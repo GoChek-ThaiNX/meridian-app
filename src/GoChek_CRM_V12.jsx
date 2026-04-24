@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, RadialBarChart, RadialBar } from "recharts";
+import { loadAll, saveAll, addItem, editItem, softDeleteItem, saveSettings, saveMarkets, alive, s3Flush } from "./s3Storage.js";
 
 // ============================================================
 // CONSTANTS
@@ -212,36 +213,8 @@ const DEFAULT_SETTINGS = {
 // ============================================================
 // STORAGE & UTILS
 // ============================================================
-// v11: Storage fallback — ưu tiên window.storage (claude.ai/extension), fallback in-memory (artifact sandbox/test)
-const _memStore = {};
-const hasClaudeStorage = typeof window !== "undefined" && window.storage && typeof window.storage.get === "function";
-const storage = {
-  get: async (key) => {
-    if (hasClaudeStorage) {
-      try { const r = await window.storage.get(key); return r ? JSON.parse(r.value) : null; } catch { return null; }
-    }
-    // Fallback: localStorage (persistent) hoặc memory
-    try {
-      if (typeof localStorage !== "undefined") {
-        const v = localStorage.getItem(key);
-        return v ? JSON.parse(v) : null;
-      }
-    } catch {}
-    return _memStore[key] ? JSON.parse(_memStore[key]) : null;
-  },
-  set: async (key, value) => {
-    if (hasClaudeStorage) {
-      try { await window.storage.set(key, JSON.stringify(value)); return; } catch {}
-    }
-    try {
-      if (typeof localStorage !== "undefined") {
-        localStorage.setItem(key, JSON.stringify(value));
-        return;
-      }
-    } catch {}
-    _memStore[key] = JSON.stringify(value);
-  },
-};
+// v12-s3: Storage layer đã chuyển sang s3Storage.js
+// File này chỉ giữ UI + business logic
 
 const fmt = (n, currency = "CNY") => {
   if (n === undefined || n === null || isNaN(n)) return "-";
@@ -5324,25 +5297,11 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      // v12: Ưu tiên load v12, nếu chưa có thì migrate từ v11/v10/v9
-      let saved = await storage.get("crm_data_v12");
-      let fromV11 = false, fromV10 = false, fromV9 = false;
-      if (!saved) {
-        const v11Data = await storage.get("crm_data_v11");
-        if (v11Data) { saved = v11Data; fromV11 = true; }
-        else {
-          const v10Data = await storage.get("crm_data_v10");
-          if (v10Data) { saved = v10Data; fromV10 = true; }
-          else {
-            const v9Data = await storage.get("crm_data_v9");
-            if (v9Data) { saved = v9Data; fromV9 = true; }
-          }
-        }
-      }
+      // v12: Load từ S3 (qua s3Storage.js)
+      let saved = await loadAll();
 
       if (saved) {
-        // v11.1: LUÔN rerun migration markets để đảm bảo mọi market đều có warehouses
-        // Fix bug: market bị mất warehouses do thao tác cũ hoặc migration chưa đủ
+        // Migration: markets warehouses
         if (!saved.markets || saved.markets.length === 0) saved.markets = SEED_MARKETS;
         saved.markets = saved.markets.map(m => {
           let warehouses;
@@ -5352,13 +5311,11 @@ export default function App() {
             const seedM = SEED_MARKETS.find(x => x.name === m.name);
             warehouses = seedM?.warehouses || [{ id: `wh_${m.id || uid()}_main`, name: `Kho ${m.name}`, address: "", note: "" }];
           }
-          // v12: Đảm bảo mỗi warehouse có field isDefault; đảm bảo có đúng 1 kho default
           warehouses = warehouses.map(w => ({ ...w, isDefault: !!w.isDefault }));
           const hasDefault = warehouses.some(w => w.isDefault);
           if (!hasDefault && warehouses.length > 0) {
             warehouses = warehouses.map((w, i) => ({ ...w, isDefault: i === 0 }));
           } else {
-            // Nhiều kho cùng isDefault → chỉ giữ cái đầu tiên
             let firstFound = false;
             warehouses = warehouses.map(w => {
               if (w.isDefault && !firstFound) { firstFound = true; return w; }
@@ -5368,53 +5325,36 @@ export default function App() {
           }
           return { ...m, warehouses };
         });
-        // Migrate factories: contact → contactPerson
+        // Migrate factories
         saved.factories = (saved.factories || []).map((f, i) => ({
           supplierCode: f.supplierCode || `NCC-${String(i + 1).padStart(3, "0")}`,
-          address: f.address || "",
-          paymentDays: f.paymentDays ?? 30,
-          productionDays: f.productionDays ?? 15,
-          bankInfo: f.bankInfo || "",
-          status: f.status || "active",
-          note: f.note || "",
-          ...f,
-          contactPerson: f.contactPerson || f.contact || "",
+          address: f.address || "", paymentDays: f.paymentDays ?? 30, productionDays: f.productionDays ?? 15,
+          bankInfo: f.bankInfo || "", status: f.status || "active", note: f.note || "",
+          ...f, contactPerson: f.contactPerson || f.contact || "",
         }));
-        // Migrate products: thêm kích thước + SL/thùng
+        // Migrate products
         saved.products = (saved.products || []).map(p => ({
-          nameImport: p.nameImport || p.name || "",
-          category: p.category || "",
-          imageUrl: p.imageUrl || "",
-          lengthCm: p.lengthCm ?? "",
-          widthCm: p.widthCm ?? "",
-          heightCm: p.heightCm ?? "",
-          qtyPerCarton: p.qtyPerCarton ?? "",
+          nameImport: p.nameImport || p.name || "", category: p.category || "", imageUrl: p.imageUrl || "",
+          lengthCm: p.lengthCm ?? "", widthCm: p.widthCm ?? "", heightCm: p.heightCm ?? "", qtyPerCarton: p.qtyPerCarton ?? "",
           ...p,
         }));
-
-        // v11: Auto-migrate carriers — tạo carrier từ text carrier trong shipments cũ
+        // Migrate carriers
         if (!saved.carriers || saved.carriers.length === 0) {
-          const carrierMap = new Map(); // name → {id, ...}
+          const carrierMap = new Map();
           (saved.shipments || []).forEach(s => {
             const name = (s.carrier || "").trim();
             if (!name || carrierMap.has(name.toLowerCase())) return;
             const nextNum = carrierMap.size + 1;
             carrierMap.set(name.toLowerCase(), {
-              id: `car_${uid().toLowerCase()}`,
-              code: `VC-${String(nextNum).padStart(3, "0")}`,
-              name,
-              type: "Khác",
-              contactPerson: "", phone: "", email: "", address: "",
-              paymentDays: 30, bankInfo: "", status: "active",
+              id: `car_${uid().toLowerCase()}`, code: `VC-${String(nextNum).padStart(3, "0")}`, name, type: "Khác",
+              contactPerson: "", phone: "", email: "", address: "", paymentDays: 30, bankInfo: "", status: "active",
               note: "Tự động tạo từ lịch sử giao hàng",
             });
           });
           saved.carriers = Array.from(carrierMap.values());
-          // Cũng hỗ trợ seed cơ bản nếu không có shipment
           if (saved.carriers.length === 0) saved.carriers = SEED_CARRIERS;
         }
-
-        // Migrate shipments: carrier text → carrierId, thêm packages/warehouseId
+        // Migrate shipments
         saved.shipments = (saved.shipments || []).map(s => {
           let carrierId = s.carrierId || "";
           if (!carrierId && s.carrier) {
@@ -5422,27 +5362,20 @@ export default function App() {
             if (c) carrierId = c.id;
           }
           return {
-            packages: s.packages || "",
-            warehouseId: s.warehouseId || "",
-            ...s,
-            carrierId,
+            packages: s.packages || "", warehouseId: s.warehouseId || "", ...s, carrierId,
             status: s.status === "Đang vận chuyển" ? "Đang vận chuyển TQ" : s.status,
-            // Đảm bảo fees có carrierId (mặc định rỗng)
             fees: (s.fees || []).map(f => ({ carrierId: f.carrierId || "", ...f })),
           };
         });
-
         // Migrate settings
         saved.settings = {
-          ...DEFAULT_SETTINGS,
-          ...saved.settings,
+          ...DEFAULT_SETTINGS, ...saved.settings,
           productCategories: saved.settings?.productCategories || DEFAULT_SETTINGS.productCategories,
           supplierStatuses: saved.settings?.supplierStatuses || DEFAULT_SETTINGS.supplierStatuses,
         };
 
         setData(d => ({ ...d, ...saved }));
-        // v12: Luôn save lại để fix data cũ (thiếu warehouses/carriers/isDefault...)
-        await storage.set("crm_data_v12", saved);
+        await saveAll(saved);
       } else {
         const init = {
           factories: SEED_FACTORIES, products: SEED_PRODUCTS, pos: SEED_POS,
@@ -5452,13 +5385,21 @@ export default function App() {
           carriers: SEED_CARRIERS, settings: DEFAULT_SETTINGS,
         };
         setData(init);
-        await storage.set("crm_data_v12", init);
+        await saveAll(init);
       }
       setLoaded(true);
     })();
   }, []);
 
-  const save = useCallback(async (next) => { setData(next); await storage.set("crm_data_v12", next); }, []);
+  // save helper — gọi s3Storage.saveAll
+  const save = useCallback(async (next) => { setData(next); await saveAll(next); }, []);
+
+  // Flush data lên S3 khi đóng tab / refresh
+  useEffect(() => {
+    const handleBeforeUnload = () => { s3Flush(data); };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [data]);
 
   const addAuditLog = (action, target, detail = {}) => {
     const log = logAudit(action, target, user, detail);
@@ -5484,13 +5425,15 @@ export default function App() {
     feePayments: "thanh toán phí",
   };
 
-  const onAdd = (key, item) => {
+  const onAdd = async (key, item) => {
     const newLog = addAuditLog(`create_${actionLabel(key)}`, item.id || item.username, item);
-    save({ ...data, [key]: [...data[key], item], auditLog: newLog });
+    const next = await addItem(data, key, item, newLog);
+    setData(next);
   };
-  const onEdit = (key, id, updates) => {
+  const onEdit = async (key, id, updates) => {
     const newLog = addAuditLog(`update_${actionLabel(key)}`, id, updates);
-    save({ ...data, [key]: data[key].map(x => x.id === id ? { ...x, ...updates } : x), auditLog: newLog });
+    const next = await editItem(data, key, id, updates, newLog);
+    setData(next);
   };
   const onDelete = (key, id) => {
     const entity = data[key].find(x => x.id === id);
@@ -5498,23 +5441,24 @@ export default function App() {
     const name = entity?.name || entity?.sku || entity?.username || entity?.id || id;
     setConfirmDialog({
       title: `Xóa ${label}?`,
-      message: `Bạn có chắc chắn muốn xóa ${label} "${name}"?\n\nHành động này KHÔNG THỂ hoàn tác.`,
+      message: `Bạn có chắc chắn muốn xóa ${label} "${name}"?\n\nDữ liệu sẽ được ẩn khỏi giao diện nhưng vẫn lưu trên hệ thống.`,
       confirmLabel: "Xóa",
       danger: true,
-      onConfirm: () => {
+      onConfirm: async () => {
         const newLog = addAuditLog(`delete_${actionLabel(key)}`, id);
-        save({ ...data, [key]: data[key].filter(x => x.id !== id), auditLog: newLog });
+        const deletedBy = user?.id || user?.username || "unknown";
+        const next = await softDeleteItem(data, key, id, deletedBy, newLog);
+        setData(next);
       },
     });
   };
-  const onSaveSettings = (newSettings) => {
+  const onSaveSettings = async (newSettings) => {
     const newLog = addAuditLog("update_settings", "settings", newSettings);
-    save({ ...data, settings: newSettings, auditLog: newLog });
+    const next = await saveSettings(data, newSettings, newLog);
+    setData(next);
   };
 
-  // v11.2: Tạo kho mới trực tiếp cho 1 market (dùng khi user bấm "Tạo ngay kho" trong ShipmentForm)
-  // v12: Nếu market chưa có kho nào → kho mới tự động là default
-  const onCreateWarehouse = (marketName, newWh) => {
+  const onCreateWarehouse = async (marketName, newWh) => {
     const updatedMarkets = data.markets.map(m => {
       if (m.name !== marketName) return m;
       const existingWhs = m.warehouses || [];
@@ -5523,25 +5467,46 @@ export default function App() {
       return { ...m, warehouses: [...existingWhs, whToAdd] };
     });
     const newLog = addAuditLog("create_warehouse", `${marketName}:${newWh.name}`, newWh);
-    save({ ...data, markets: updatedMarkets, auditLog: newLog });
+    const next = await saveMarkets(data, updatedMarkets, newLog);
+    setData(next);
   };
 
-  const handleLogin = (loggedUser) => {
+  const handleLogin = async (loggedUser) => {
     const log = logAudit("login", loggedUser.username, user || loggedUser);
-    save({ ...data, auditLog: [...data.auditLog, log] });
+    const next = { ...data, auditLog: [...data.auditLog, log] };
+    setData(next);
+    await saveAll(next);
     setUser(loggedUser);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     if (user) {
       const log = logAudit("logout", user.username, user);
-      save({ ...data, auditLog: [...data.auditLog, log] });
+      const next = { ...data, auditLog: [...data.auditLog, log] };
+      setData(next);
+      await saveAll(next);
     }
     setUser(null);
   };
 
   if (!loaded) return <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: C.bg, color: C.textMuted }}>Đang tải...</div>;
   if (!user) return <><style>{css}</style><LoginScreen onLogin={handleLogin} users={data.users} /></>;
+
+  // Filter soft-deleted items cho tất cả views (alive() từ s3Storage.js)
+  const view = useMemo(() => ({
+    factories: alive(data.factories),
+    products: alive(data.products),
+    pos: alive(data.pos),
+    shipments: alive(data.shipments),
+    payments: alive(data.payments),
+    users: alive(data.users),
+    openingBalances: alive(data.openingBalances),
+    feePayments: alive(data.feePayments),
+    markets: alive(data.markets),
+    carriers: alive(data.carriers),
+    auditLog: data.auditLog || [],
+    settings: data.settings,
+  }), [data]);
 
   const currentTab = TABS.find(t => t.id === tab);
   const availableTabs = TABS.filter(t => !t.perm || can(user, t.perm));
@@ -5602,7 +5567,7 @@ export default function App() {
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
               <div style={{ fontSize: 12, color: C.textMuted }}>
-                💱 1 CNY = <b>{data.settings.cnyToVnd.toLocaleString("vi-VN")}</b> VND
+                💱 1 CNY = <b>{view.settings.cnyToVnd.toLocaleString("vi-VN")}</b> VND
               </div>
               <div style={{ fontSize: 12, color: C.textMuted }}>
                 {new Date().toLocaleDateString("vi-VN", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
@@ -5611,21 +5576,21 @@ export default function App() {
           </div>
 
           <div style={{ padding: 28, flex: 1 }}>
-            {tab === "dashboard" && <Dashboard pos={data.pos} shipments={data.shipments} payments={data.payments} factories={data.factories} products={data.products} openingBalances={data.openingBalances} markets={data.markets} carriers={data.carriers} feePayments={data.feePayments} settings={data.settings} onNavigate={setTab} />}
-            {tab === "products" && <Products products={data.products} pos={data.pos} shipments={data.shipments} factories={data.factories} settings={data.settings} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} onSaveSettings={onSaveSettings} user={user} />}
-            {tab === "pos" && <POs pos={data.pos} factories={data.factories} products={data.products} shipments={data.shipments} settings={data.settings} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} onConfirm={setConfirmDialog} user={user} />}
-            {tab === "shipments" && <Shipments shipments={data.shipments} pos={data.pos} factories={data.factories} products={data.products} feePayments={data.feePayments} markets={data.markets} carriers={data.carriers} settings={data.settings} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} onCreateWarehouse={onCreateWarehouse} user={user} />}
-            {tab === "fees" && <ImportFees shipments={data.shipments} feePayments={data.feePayments} markets={data.markets} carriers={data.carriers} settings={data.settings} onAdd={onAdd} onDelete={onDelete} user={user} />}
-            {tab === "debts" && <Debts pos={data.pos} shipments={data.shipments} payments={data.payments} factories={data.factories} openingBalances={data.openingBalances} settings={data.settings} feePayments={data.feePayments} products={data.products} carriers={data.carriers} markets={data.markets} user={user} />}
-            {tab === "market_debts" && <MarketDebts pos={data.pos} shipments={data.shipments} payments={data.payments} factories={data.factories} markets={data.markets} settings={data.settings} />}
-            {tab === "opening_balance" && <OpeningBalances openingBalances={data.openingBalances} factories={data.factories} settings={data.settings} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} user={user} />}
-            {tab === "payments" && <Payments pos={data.pos} shipments={data.shipments} payments={data.payments} factories={data.factories} openingBalances={data.openingBalances} markets={data.markets} settings={data.settings} onAdd={onAdd} onDelete={onDelete} user={user} />}
-            {tab === "factories" && <Factories factories={data.factories} settings={data.settings} pos={data.pos} shipments={data.shipments} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} user={user} />}
-            {tab === "carriers" && <Carriers carriers={data.carriers} shipments={data.shipments} feePayments={data.feePayments} settings={data.settings} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} user={user} />}
-            {tab === "markets" && <Markets markets={data.markets} shipments={data.shipments} payments={data.payments} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} user={user} />}
-            {tab === "users" && <Users users={data.users} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} user={user} />}
-            {tab === "audit" && <AuditLog auditLog={data.auditLog} />}
-            {tab === "settings" && <Settings settings={data.settings} onSave={onSaveSettings} user={user} />}
+            {tab === "dashboard" && <Dashboard pos={view.pos} shipments={view.shipments} payments={view.payments} factories={view.factories} products={view.products} openingBalances={view.openingBalances} markets={view.markets} carriers={view.carriers} feePayments={view.feePayments} settings={view.settings} onNavigate={setTab} />}
+            {tab === "products" && <Products products={view.products} pos={view.pos} shipments={view.shipments} factories={view.factories} settings={view.settings} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} onSaveSettings={onSaveSettings} user={user} />}
+            {tab === "pos" && <POs pos={view.pos} factories={view.factories} products={view.products} shipments={view.shipments} settings={view.settings} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} onConfirm={setConfirmDialog} user={user} />}
+            {tab === "shipments" && <Shipments shipments={view.shipments} pos={view.pos} factories={view.factories} products={view.products} feePayments={view.feePayments} markets={view.markets} carriers={view.carriers} settings={view.settings} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} onCreateWarehouse={onCreateWarehouse} user={user} />}
+            {tab === "fees" && <ImportFees shipments={view.shipments} feePayments={view.feePayments} markets={view.markets} carriers={view.carriers} settings={view.settings} onAdd={onAdd} onDelete={onDelete} user={user} />}
+            {tab === "debts" && <Debts pos={view.pos} shipments={view.shipments} payments={view.payments} factories={view.factories} openingBalances={view.openingBalances} settings={view.settings} feePayments={view.feePayments} products={view.products} carriers={view.carriers} markets={view.markets} user={user} />}
+            {tab === "market_debts" && <MarketDebts pos={view.pos} shipments={view.shipments} payments={view.payments} factories={view.factories} markets={view.markets} settings={view.settings} />}
+            {tab === "opening_balance" && <OpeningBalances openingBalances={view.openingBalances} factories={view.factories} settings={view.settings} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} user={user} />}
+            {tab === "payments" && <Payments pos={view.pos} shipments={view.shipments} payments={view.payments} factories={view.factories} openingBalances={view.openingBalances} markets={view.markets} settings={view.settings} onAdd={onAdd} onDelete={onDelete} user={user} />}
+            {tab === "factories" && <Factories factories={view.factories} settings={view.settings} pos={view.pos} shipments={view.shipments} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} user={user} />}
+            {tab === "carriers" && <Carriers carriers={view.carriers} shipments={view.shipments} feePayments={view.feePayments} settings={view.settings} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} user={user} />}
+            {tab === "markets" && <Markets markets={view.markets} shipments={view.shipments} payments={view.payments} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} user={user} />}
+            {tab === "users" && <Users users={view.users} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} user={user} />}
+            {tab === "audit" && <AuditLog auditLog={view.auditLog} />}
+            {tab === "settings" && <Settings settings={view.settings} onSave={onSaveSettings} user={user} />}
           </div>
         </div>
       </div>
