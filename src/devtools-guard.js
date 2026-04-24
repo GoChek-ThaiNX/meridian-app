@@ -34,8 +34,18 @@ export function initDevToolsGuard() {
     debugger;
     const duration = performance.now() - start;
     if (duration > threshold) {
-      // DevTools đang mở — có thể redirect hoặc clear page
-      document.body.innerHTML = "<div style='display:flex;align-items:center;justify-content:center;height:100vh;font-size:20px;color:#666;font-family:sans-serif'>⚠️ Vui lòng đóng Developer Tools để tiếp tục sử dụng</div>";
+      // DevTools đang mở — xóa nội dung + thử đóng tab
+      document.body.innerHTML = "";
+      // window.close() chỉ hoạt động nếu tab được mở bằng JS (window.open)
+      // Nếu không đóng được → redirect về blank rồi close
+      try {
+        window.open("about:blank", "_self");
+        window.close();
+      } catch {}
+      // Fallback: nếu vẫn không đóng được → redirect về trang trắng
+      setTimeout(() => {
+        try { window.location.replace("about:blank"); } catch {}
+      }, 100);
     }
   }, 2000);
 }
