@@ -239,3 +239,77 @@ export async function saveMarkets(data, updatedMarkets, auditLog) {
 export function alive(arr) {
   return (arr || []).filter(x => !x.deleted);
 }
+
+// ============================================================
+// AUTO SYNC — Push + Pull mỗi 5 phút
+// Pull: GET từ S3, nếu data mới hơn → cập nhật UI
+// Push: Nếu local có thay đổi chưa sync → PUT lên S3
+// ============================================================
+
+const AUTO_SYNC_INTERVAL = 5 * 60 * 1000; // 5 phút
+let _syncTimer = null;
+let _lastSyncedJSON = null; // JSON string của lần sync gần nhất, dùng để detect thay đổi
+
+/**
+ * Bắt đầu auto sync
+ * @param {Function} getDataFn - () => data hiện tại
+ * @param {Function} setDataFn - (newData) => cập nhật state UI
+ */
+export function startAutoSync(getDataFn, setDataFn) {
+  stopAutoSync();
+  _syncTimer = setInterval(async () => {
+    try {
+      const localData = getDataFn();
+      if (!localData) return;
+
+      // 1. Pull: GET từ S3
+      const remoteData = await s3Get();
+
+      if (remoteData) {
+        const localJSON = JSON.stringify(localData);
+        const remoteJSON = JSON.stringify(remoteData);
+
+        // Nếu remote khác local → ai mới hơn?
+        if (localJSON !== remoteJSON) {
+          // So sánh bằng auditLog length — nhiều hơn = mới hơn
+          const localLogLen = (localData.auditLog || []).length;
+          const remoteLogLen = (remoteData.auditLog || []).length;
+
+          if (remoteLogLen > localLogLen) {
+            // Remote mới hơn → pull về UI
+            console.log(`[AutoSync] Pull — remote has ${remoteLogLen} logs vs local ${localLogLen}`);
+            setDataFn(remoteData);
+            _lastSyncedJSON = remoteJSON;
+            // Cache vào localStorage
+            try { if (typeof localStorage !== "undefined") localStorage.setItem(STORAGE_KEY, remoteJSON); } catch {}
+            return;
+          }
+        }
+      }
+
+      // 2. Push: Nếu local thay đổi so với lần sync trước → đẩy lên S3
+      const currentJSON = JSON.stringify(localData);
+      if (_lastSyncedJSON !== currentJSON) {
+        console.log("[AutoSync] Push — local data changed, syncing to S3...");
+        const ok = await s3Put(localData);
+        if (ok) _lastSyncedJSON = currentJSON;
+      } else {
+        console.log("[AutoSync] No changes detected, skipping");
+      }
+    } catch (err) {
+      console.warn("[AutoSync] Error:", err.message);
+    }
+  }, AUTO_SYNC_INTERVAL);
+  console.log(`[AutoSync] Started Push+Pull — every ${AUTO_SYNC_INTERVAL / 1000}s`);
+}
+
+/**
+ * Dừng auto sync
+ */
+export function stopAutoSync() {
+  if (_syncTimer) {
+    clearInterval(_syncTimer);
+    _syncTimer = null;
+    console.log("[AutoSync] Stopped");
+  }
+}

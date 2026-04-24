@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react";
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, RadialBarChart, RadialBar } from "recharts";
-import { loadAll, saveAll, addItem, editItem, softDeleteItem, saveSettings, saveMarkets, alive, s3Flush } from "./s3Storage.js";
+import { loadAll, saveAll, addItem, editItem, softDeleteItem, saveSettings as saveSettingsToS3, saveMarkets, alive, s3Flush, startAutoSync, stopAutoSync } from "./s3Storage.js";
 
 // ============================================================
 // CONSTANTS
@@ -214,7 +214,6 @@ const DEFAULT_SETTINGS = {
 // STORAGE & UTILS
 // ============================================================
 // v12-s3: Storage layer đã chuyển sang s3Storage.js
-// File này chỉ giữ UI + business logic
 
 const fmt = (n, currency = "CNY") => {
   if (n === undefined || n === null || isNaN(n)) return "-";
@@ -5297,93 +5296,34 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      // v12: Load từ S3 (qua s3Storage.js)
       let saved = await loadAll();
 
       if (saved) {
-        // Migration: markets warehouses
         if (!saved.markets || saved.markets.length === 0) saved.markets = SEED_MARKETS;
         saved.markets = saved.markets.map(m => {
           let warehouses;
-          if (Array.isArray(m.warehouses) && m.warehouses.length > 0) {
-            warehouses = m.warehouses;
-          } else {
-            const seedM = SEED_MARKETS.find(x => x.name === m.name);
-            warehouses = seedM?.warehouses || [{ id: `wh_${m.id || uid()}_main`, name: `Kho ${m.name}`, address: "", note: "" }];
-          }
+          if (Array.isArray(m.warehouses) && m.warehouses.length > 0) { warehouses = m.warehouses; }
+          else { const seedM = SEED_MARKETS.find(x => x.name === m.name); warehouses = seedM?.warehouses || [{ id: `wh_${m.id || uid()}_main`, name: `Kho ${m.name}`, address: "", note: "" }]; }
           warehouses = warehouses.map(w => ({ ...w, isDefault: !!w.isDefault }));
           const hasDefault = warehouses.some(w => w.isDefault);
-          if (!hasDefault && warehouses.length > 0) {
-            warehouses = warehouses.map((w, i) => ({ ...w, isDefault: i === 0 }));
-          } else {
-            let firstFound = false;
-            warehouses = warehouses.map(w => {
-              if (w.isDefault && !firstFound) { firstFound = true; return w; }
-              if (w.isDefault) return { ...w, isDefault: false };
-              return w;
-            });
-          }
+          if (!hasDefault && warehouses.length > 0) { warehouses = warehouses.map((w, i) => ({ ...w, isDefault: i === 0 })); }
+          else { let firstFound = false; warehouses = warehouses.map(w => { if (w.isDefault && !firstFound) { firstFound = true; return w; } if (w.isDefault) return { ...w, isDefault: false }; return w; }); }
           return { ...m, warehouses };
         });
-        // Migrate factories
-        saved.factories = (saved.factories || []).map((f, i) => ({
-          supplierCode: f.supplierCode || `NCC-${String(i + 1).padStart(3, "0")}`,
-          address: f.address || "", paymentDays: f.paymentDays ?? 30, productionDays: f.productionDays ?? 15,
-          bankInfo: f.bankInfo || "", status: f.status || "active", note: f.note || "",
-          ...f, contactPerson: f.contactPerson || f.contact || "",
-        }));
-        // Migrate products
-        saved.products = (saved.products || []).map(p => ({
-          nameImport: p.nameImport || p.name || "", category: p.category || "", imageUrl: p.imageUrl || "",
-          lengthCm: p.lengthCm ?? "", widthCm: p.widthCm ?? "", heightCm: p.heightCm ?? "", qtyPerCarton: p.qtyPerCarton ?? "",
-          ...p,
-        }));
-        // Migrate carriers
+        saved.factories = (saved.factories || []).map((f, i) => ({ supplierCode: f.supplierCode || `NCC-${String(i + 1).padStart(3, "0")}`, address: f.address || "", paymentDays: f.paymentDays ?? 30, productionDays: f.productionDays ?? 15, bankInfo: f.bankInfo || "", status: f.status || "active", note: f.note || "", ...f, contactPerson: f.contactPerson || f.contact || "" }));
+        saved.products = (saved.products || []).map(p => ({ nameImport: p.nameImport || p.name || "", category: p.category || "", imageUrl: p.imageUrl || "", lengthCm: p.lengthCm ?? "", widthCm: p.widthCm ?? "", heightCm: p.heightCm ?? "", qtyPerCarton: p.qtyPerCarton ?? "", ...p }));
         if (!saved.carriers || saved.carriers.length === 0) {
           const carrierMap = new Map();
-          (saved.shipments || []).forEach(s => {
-            const name = (s.carrier || "").trim();
-            if (!name || carrierMap.has(name.toLowerCase())) return;
-            const nextNum = carrierMap.size + 1;
-            carrierMap.set(name.toLowerCase(), {
-              id: `car_${uid().toLowerCase()}`, code: `VC-${String(nextNum).padStart(3, "0")}`, name, type: "Khác",
-              contactPerson: "", phone: "", email: "", address: "", paymentDays: 30, bankInfo: "", status: "active",
-              note: "Tự động tạo từ lịch sử giao hàng",
-            });
-          });
+          (saved.shipments || []).forEach(s => { const name = (s.carrier || "").trim(); if (!name || carrierMap.has(name.toLowerCase())) return; const nextNum = carrierMap.size + 1; carrierMap.set(name.toLowerCase(), { id: `car_${uid().toLowerCase()}`, code: `VC-${String(nextNum).padStart(3, "0")}`, name, type: "Khác", contactPerson: "", phone: "", email: "", address: "", paymentDays: 30, bankInfo: "", status: "active", note: "Tự động tạo từ lịch sử giao hàng" }); });
           saved.carriers = Array.from(carrierMap.values());
           if (saved.carriers.length === 0) saved.carriers = SEED_CARRIERS;
         }
-        // Migrate shipments
-        saved.shipments = (saved.shipments || []).map(s => {
-          let carrierId = s.carrierId || "";
-          if (!carrierId && s.carrier) {
-            const c = (saved.carriers || []).find(x => x.name.toLowerCase() === String(s.carrier).toLowerCase());
-            if (c) carrierId = c.id;
-          }
-          return {
-            packages: s.packages || "", warehouseId: s.warehouseId || "", ...s, carrierId,
-            status: s.status === "Đang vận chuyển" ? "Đang vận chuyển TQ" : s.status,
-            fees: (s.fees || []).map(f => ({ carrierId: f.carrierId || "", ...f })),
-          };
-        });
-        // Migrate settings
-        saved.settings = {
-          ...DEFAULT_SETTINGS, ...saved.settings,
-          productCategories: saved.settings?.productCategories || DEFAULT_SETTINGS.productCategories,
-          supplierStatuses: saved.settings?.supplierStatuses || DEFAULT_SETTINGS.supplierStatuses,
-        };
-
+        saved.shipments = (saved.shipments || []).map(s => { let carrierId = s.carrierId || ""; if (!carrierId && s.carrier) { const c = (saved.carriers || []).find(x => x.name.toLowerCase() === String(s.carrier).toLowerCase()); if (c) carrierId = c.id; } return { packages: s.packages || "", warehouseId: s.warehouseId || "", ...s, carrierId, status: s.status === "Đang vận chuyển" ? "Đang vận chuyển TQ" : s.status, fees: (s.fees || []).map(f => ({ carrierId: f.carrierId || "", ...f })) }; });
+        saved.settings = { ...DEFAULT_SETTINGS, ...saved.settings, productCategories: saved.settings?.productCategories || DEFAULT_SETTINGS.productCategories, supplierStatuses: saved.settings?.supplierStatuses || DEFAULT_SETTINGS.supplierStatuses };
         setData(d => ({ ...d, ...saved }));
         await saveAll(saved);
       } else {
-        const init = {
-          factories: SEED_FACTORIES, products: SEED_PRODUCTS, pos: SEED_POS,
-          shipments: SEED_SHIPMENTS, payments: SEED_PAYMENTS, users: SEED_USERS,
-          auditLog: SEED_AUDIT_LOG, openingBalances: SEED_OPENING_BALANCES,
-          feePayments: SEED_FEE_PAYMENTS, markets: SEED_MARKETS,
-          carriers: SEED_CARRIERS, settings: DEFAULT_SETTINGS,
-        };
+        const init = { factories: SEED_FACTORIES, products: SEED_PRODUCTS, pos: SEED_POS, shipments: SEED_SHIPMENTS, payments: SEED_PAYMENTS, users: SEED_USERS, auditLog: SEED_AUDIT_LOG, openingBalances: SEED_OPENING_BALANCES, feePayments: SEED_FEE_PAYMENTS, markets: SEED_MARKETS, carriers: SEED_CARRIERS, settings: DEFAULT_SETTINGS };
         setData(init);
         await saveAll(init);
       }
@@ -5391,7 +5331,6 @@ export default function App() {
     })();
   }, []);
 
-  // save helper — gọi s3Storage.saveAll
   const save = useCallback(async (next) => { setData(next); await saveAll(next); }, []);
 
   // Flush data lên S3 khi đóng tab / refresh
@@ -5400,6 +5339,14 @@ export default function App() {
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [data]);
+
+  // Auto sync Push+Pull mỗi 5 phút
+  const dataRef = useRef(data);
+  dataRef.current = data;
+  useEffect(() => {
+    startAutoSync(() => dataRef.current, (newData) => setData(newData));
+    return () => stopAutoSync();
+  }, []);
 
   const addAuditLog = (action, target, detail = {}) => {
     const log = logAudit(action, target, user, detail);
@@ -5454,7 +5401,7 @@ export default function App() {
   };
   const onSaveSettings = async (newSettings) => {
     const newLog = addAuditLog("update_settings", "settings", newSettings);
-    const next = await saveSettings(data, newSettings, newLog);
+    const next = await saveSettingsToS3(data, newSettings, newLog);
     setData(next);
   };
 
@@ -5472,11 +5419,11 @@ export default function App() {
   };
 
   const handleLogin = async (loggedUser) => {
-    const log = logAudit("login", loggedUser.username, user || loggedUser);
+    setUser(loggedUser);
+    const log = logAudit("login", loggedUser.username, loggedUser);
     const next = { ...data, auditLog: [...data.auditLog, log] };
     setData(next);
-    await saveAll(next);
-    setUser(loggedUser);
+    try { await saveAll(next); } catch (e) { console.warn("[Login] Save audit failed:", e.message); }
   };
 
   const handleLogout = async () => {
@@ -5484,29 +5431,22 @@ export default function App() {
       const log = logAudit("logout", user.username, user);
       const next = { ...data, auditLog: [...data.auditLog, log] };
       setData(next);
-      await saveAll(next);
+      try { await saveAll(next); } catch (e) { console.warn("[Logout] Save audit failed:", e.message); }
     }
     setUser(null);
   };
 
+  // Filter soft-deleted items cho tất cả views — PHẢI đặt trước early return để giữ đúng số hooks
+  const view = useMemo(() => ({
+    factories: alive(data.factories), products: alive(data.products), pos: alive(data.pos),
+    shipments: alive(data.shipments), payments: alive(data.payments), users: alive(data.users),
+    openingBalances: alive(data.openingBalances), feePayments: alive(data.feePayments),
+    markets: alive(data.markets), carriers: alive(data.carriers),
+    auditLog: data.auditLog || [], settings: data.settings,
+  }), [data]);
+
   if (!loaded) return <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: C.bg, color: C.textMuted }}>Đang tải...</div>;
   if (!user) return <><style>{css}</style><LoginScreen onLogin={handleLogin} users={data.users} /></>;
-
-  // Filter soft-deleted items cho tất cả views (alive() từ s3Storage.js)
-  const view = useMemo(() => ({
-    factories: alive(data.factories),
-    products: alive(data.products),
-    pos: alive(data.pos),
-    shipments: alive(data.shipments),
-    payments: alive(data.payments),
-    users: alive(data.users),
-    openingBalances: alive(data.openingBalances),
-    feePayments: alive(data.feePayments),
-    markets: alive(data.markets),
-    carriers: alive(data.carriers),
-    auditLog: data.auditLog || [],
-    settings: data.settings,
-  }), [data]);
 
   const currentTab = TABS.find(t => t.id === tab);
   const availableTabs = TABS.filter(t => !t.perm || can(user, t.perm));
