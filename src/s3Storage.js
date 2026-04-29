@@ -241,12 +241,12 @@ export function alive(arr) {
 }
 
 // ============================================================
-// AUTO SYNC — Push + Pull mỗi 5 phút
+// AUTO SYNC — Push + Pull mỗi 2 phút
 // Pull: GET từ S3, nếu data mới hơn → cập nhật UI
 // Push: Nếu local có thay đổi chưa sync → PUT lên S3
 // ============================================================
 
-const AUTO_SYNC_INTERVAL = 5 * 60 * 1000; // 5 phút
+const AUTO_SYNC_INTERVAL = 2 * 60 * 1000; // 2 phút
 let _syncTimer = null;
 let _lastSyncedJSON = null; // JSON string của lần sync gần nhất, dùng để detect thay đổi
 
