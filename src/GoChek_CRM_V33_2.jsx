@@ -4260,9 +4260,10 @@ const ProductForm = ({ initial, factories, markets = [], settings, onSave, onCre
   );
 };
 
-const Products = ({ products, pos, shipments, factories, markets = [], settings, onAdd, onEdit, onDelete, onSaveSettings, user }) => {
+const Products = ({ products, allProducts = [], pos, shipments, factories, markets = [], settings, onAdd, onEdit, onDelete, onRestore, onSaveSettings, user }) => {
   const [modal, setModal] = useState(null);
   const [filter, setFilter] = useState({ factory: "", category: "", search: "" });
+  const [showDeleted, setShowDeleted] = useState(false);
 
   const productStats = useMemo(() => products.map(p => {
     let totalOrdered = 0, totalShipped = 0;
@@ -4279,6 +4280,8 @@ const Products = ({ products, pos, shipments, factories, markets = [], settings,
     const remaining = Math.max(0, totalOrdered - totalShipped);
     return { ...p, totalOrdered, totalShipped, remaining };
   }), [products, pos, shipments]);
+
+  const deletedProducts = useMemo(() => (allProducts || []).filter(p => p.deleted), [allProducts]);
 
   const filtered = productStats.filter(p =>
     (!filter.factory || p.factoryId === filter.factory) &&
@@ -4337,6 +4340,7 @@ const Products = ({ products, pos, shipments, factories, markets = [], settings,
       <SectionHeader title="Sản phẩm" subtitle="Quản lý SKU, tồn kho, đặt hàng, giao hàng"
         action={
           <div style={{ display: "flex", gap: 8 }}>
+            {canEdit && deletedProducts.length > 0 && <button className="btn btn-ghost" style={{ color: showDeleted ? C.orange : C.textMuted }} onClick={() => setShowDeleted(s => !s)}>🗑️ Đã xóa ({deletedProducts.length})</button>}
             {canManageSettings && <button className="btn btn-ghost" onClick={() => setShowCatManager(true)}>🏷️ Quản lý danh mục</button>}
             {canEdit && <button className="btn btn-primary" onClick={() => setModal({ type: "new" })}>+ Thêm sản phẩm</button>}
           </div>
@@ -4399,6 +4403,42 @@ const Products = ({ products, pos, shipments, factories, markets = [], settings,
           </tbody>
         </table>
       </div>
+
+      {showDeleted && deletedProducts.length > 0 && (
+        <div className="card" style={{ marginTop: 16, padding: 0, overflow: "visible", border: `1px dashed ${C.orange}` }}>
+          <div style={{ padding: "12px 16px", background: "#fff7ed", borderBottom: `1px solid #fed7aa`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span style={{ fontWeight: 700, fontSize: 13, color: C.orange }}>🗑️ Sản phẩm đã xóa ({deletedProducts.length})</span>
+            <span style={{ fontSize: 11, color: C.textMuted }}>Bấm "♻️ Khôi phục" để đưa sản phẩm trở lại danh sách</span>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>SKU</th><th>Sản phẩm</th><th>Danh mục</th><th>NCC</th><th>Ngày xóa</th>
+                {canEdit && <th></th>}
+              </tr>
+            </thead>
+            <tbody>
+              {deletedProducts.map(p => {
+                const f = factories.find(x => x.id === p.factoryId);
+                return (
+                  <tr key={p.id} style={{ opacity: 0.6 }}>
+                    <td style={{ fontWeight: 700, color: C.textMuted, textDecoration: "line-through" }}>{p.sku}</td>
+                    <td style={{ textDecoration: "line-through" }}>{p.name}</td>
+                    <td>{p.category || "—"}</td>
+                    <td style={{ fontSize: 12 }}>{f?.name || "—"}</td>
+                    <td style={{ fontSize: 11, color: C.textMuted }}>{fmtDateTime(p.deletedAt)}</td>
+                    {canEdit && (
+                      <td>
+                        <button className="btn btn-primary" style={{ padding: "5px 12px", fontSize: 11 }} onClick={() => onRestore("products", p.id)}>♻️ Khôi phục</button>
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {modal?.type === "new" && <ProductForm factories={factories} markets={markets} settings={settings}
         onCreateCategory={canEdit ? (cat) => onSaveSettings({ ...settings, productCategories: [...(settings.productCategories || []), cat] }) : null}
@@ -10870,6 +10910,11 @@ export default function App() {
       },
     });
   };
+  const onRestore = async (key, id) => {
+    const newLog = addAuditLog(`restore_${actionLabel(key)}`, id);
+    const next = await editItem(data, key, id, { deleted: false, deletedAt: null, deletedBy: null }, newLog);
+    setData(next);
+  };
   const onSaveSettings = async (newSettings) => {
     const newLog = addAuditLog("update_settings", "settings", newSettings);
     const next = await saveSettingsToS3(data, newSettings, newLog);
@@ -11058,7 +11103,7 @@ export default function App() {
 
           <div style={{ padding: 28, flex: 1 }}>
             {tab === "dashboard" && <Dashboard pos={view.pos} shipments={view.shipments} payments={view.payments} factories={view.factories} products={view.products} openingBalances={view.openingBalances} markets={view.markets} carriers={view.carriers} feePayments={view.feePayments} settings={view.settings} onNavigate={setTab} />}
-            {tab === "products" && <Products products={view.products} pos={view.pos} shipments={view.shipments} factories={view.factories} markets={view.markets} settings={view.settings} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} onSaveSettings={onSaveSettings} user={user} />}
+            {tab === "products" && <Products products={view.products} allProducts={data.products} pos={view.pos} shipments={view.shipments} factories={view.factories} markets={view.markets} settings={view.settings} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} onRestore={onRestore} onSaveSettings={onSaveSettings} user={user} />}
             {tab === "pos" && <POs pos={view.pos} factories={view.factories} products={view.products} shipments={view.shipments} settings={view.settings} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} onConfirm={setConfirmDialog} user={user} />}
             {tab === "shipments" && <Shipments shipments={view.shipments} pos={view.pos} factories={view.factories} products={view.products} feePayments={view.feePayments} markets={view.markets} carriers={view.carriers} settings={view.settings} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} onCreateWarehouse={onCreateWarehouse} user={user} />}
             {tab === "warranties" && <Warranties warranties={view.warranties} factories={view.factories} markets={view.markets} products={view.products} settings={view.settings} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} user={user} />}
