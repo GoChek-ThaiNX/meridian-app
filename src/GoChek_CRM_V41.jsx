@@ -4,7 +4,7 @@ import * as XLSX from "xlsx";  // v23b: Đọc file xlsx import từ user
 import { loadAll, saveAll, addItem, editItem, softDeleteItem, saveSettings as saveSettingsToS3, saveMarkets, alive, s3Flush, startAutoSync, stopAutoSync } from "./s3Storage.js";
 
 // ============================================================
-// GoChek Factory CRM — Phiên bản V38i
+// GC Factory CRM — Phiên bản V38i
 // ============================================================
 // CHANGELOG V38i (vs V38h) — 9 mục + 4 invariant test:
 //
@@ -528,7 +528,7 @@ const HELP_CONTENT = {
         icon: "👋",
         keywords: ["intro", "gioi thieu", "tong quan", "overview", "he thong"],
         content: [
-          { type: "p", text: "GoChek CRM là hệ thống quản lý nhập khẩu — kế toán nội bộ, được xây dựng riêng cho mô hình kinh doanh của GoChek: nhập hàng từ nhà máy Trung Quốc, phân phối qua nhiều thị trường (VN, TH, MY, PH), bán qua nhiều kênh (Shopee, TikTok, đại lý B2B)." },
+          { type: "p", text: "GC CRM là hệ thống quản lý nhập khẩu — kế toán nội bộ, được xây dựng riêng cho mô hình kinh doanh của GC: nhập hàng từ nhà máy Trung Quốc, phân phối qua nhiều thị trường (VN, TH, MY, PH), bán qua nhiều kênh (Shopee, TikTok, đại lý B2B)." },
           { type: "h", text: "Hệ thống quản lý:" },
           { type: "list", items: [
             "📋 Đặt hàng (PO) với nhà cung cấp Trung Quốc",
@@ -755,9 +755,9 @@ const HELP_CONTENT = {
         keywords: ["payment", "thanh toan", "stage", "carrier", "uy thac", "chuyen quoc te", "hoan tat", "v38"],
         content: [
           { type: "h", text: "Khái niệm 3 trạng thái (V38):" },
-          { type: "p", text: "Khi GoChek thanh toán cho NCC, dòng tiền không tới ngay mà phải qua nhiều khâu. V38 chia thành 3 stage để Liễu theo dõi 'tiền treo' chính xác:" },
+          { type: "p", text: "Khi GC thanh toán cho NCC, dòng tiền không tới ngay mà phải qua nhiều khâu. V38 chia thành 3 stage để Liễu theo dõi 'tiền treo' chính xác:" },
           { type: "list", items: [
-            "🏦 Stage 1 — Đã chuyển uỷ thác: GoChek đã chuyển tiền cho carrier/đơn vị uỷ thác xuất của NM. Tiền đã rời TK GoChek nhưng NCC chưa nhận.",
+            "🏦 Stage 1 — Đã chuyển uỷ thác: GC đã chuyển tiền cho carrier/đơn vị uỷ thác xuất của NM. Tiền đã rời TK GC nhưng NCC chưa nhận.",
             "🌐 Stage 2 — Đang chuyển quốc tế: Carrier đang chuyển tiền QT cho NCC. Tiền vẫn 'treo' chưa đến tài khoản NCC.",
             "✅ Stage 3 — Hoàn tất thanh toán: NCC xác nhận đã nhận đủ tiền. Công nợ NCC giảm tương ứng. KHÔNG thể quay lui từ trạng thái này.",
           ]},
@@ -809,7 +809,7 @@ const HELP_CONTENT = {
           ]},
           { type: "tip", text: "📝 Lô Nháp KHÔNG tính vào công nợ NCC — cả 'Hàng chờ ship' và 'Hàng đã ship'. Chỉ khi duyệt Nháp → Chờ xuất mới bắt đầu tính." },
           { type: "h", text: "🟡 Cột 'Đang TT' (V38):" },
-          { type: "p", text: "Hiển thị tổng tiền GoChek đã chuyển ra (cho carrier hoặc đang chuyển QT) nhưng NCC chưa xác nhận nhận được. Đây là tiền 'lơ lửng' — đã rời tài khoản TT nhưng chưa thực sự đến NCC." },
+          { type: "p", text: "Hiển thị tổng tiền GC đã chuyển ra (cho carrier hoặc đang chuyển QT) nhưng NCC chưa xác nhận nhận được. Đây là tiền 'lơ lửng' — đã rời tài khoản TT nhưng chưa thực sự đến NCC." },
           { type: "list", items: [
             "Nếu cột này > 0 → có giao dịch đang treo, cần follow up với carrier",
             "Cảnh báo Dashboard: nếu tiền treo > 4 ngày ở stage 1 hoặc 2 → báo nhắc",
@@ -955,7 +955,7 @@ const HELP_CONTENT = {
           { type: "h", text: "🚨 Ngưỡng cảnh báo tồn kho theo kho:" },
           { type: "p", text: "Mỗi SP có thể cấu hình ngưỡng RIÊNG cho TỪNG kho. Vd: SP S24-02 ở Bình Dương ngưỡng 50, ở HCM ngưỡng 20." },
           { type: "h", text: "🔗 SKU bên phần mềm bán hàng:" },
-          { type: "p", text: "Vì SKU bên Nhanh.vn (vd: 'S2402') khác bên Pancake (vd: 'GoChek S24-02') khác bên CRM (vd: 'S24-02') — cần map đối chiếu." },
+          { type: "p", text: "Vì SKU bên Nhanh.vn (vd: 'S2402') khác bên Pancake (vd: 'GC S24-02') khác bên CRM (vd: 'S24-02') — cần map đối chiếu." },
           { type: "warn", text: "Khi import từ Nhanh/Pancake, nếu SP CRM chưa có SKU map tương ứng → CRM báo 'Chưa map SKU' và reject toàn bộ file. Phải vào đây thêm SKU map trước khi import." },
         ],
       },
@@ -1634,13 +1634,13 @@ const PAYMENT_TYPES = {
 // Cảnh báo "tiền treo": > 4 ngày ở stage 1 hoặc stage 2 (đếm từ lúc vào stage, reset khi đổi)
 const PAYMENT_STAGES = {
   carrier:      { id: "carrier",      label: "Đã chuyển uỷ thác",      icon: "🏦", color: "#F39C12", bg: "#FCEBD0", short: "Đã chuyển UT",
-                   description: "GoChek đã chuyển tiền cho carrier/đơn vị uỷ thác xuất của nhà máy. Tiền đã rời thị trường nhưng NCC chưa nhận." },
+                   description: "GC đã chuyển tiền cho carrier/đơn vị uỷ thác xuất của nhà máy. Tiền đã rời thị trường nhưng NCC chưa nhận." },
   transferring: { id: "transferring", label: "Đang chuyển quốc tế",   icon: "🌐", color: "#3498DB", bg: "#D6EAF8", short: "Đang chuyển QT",
                    description: "Carrier đang chuyển tiền quốc tế cho NCC. Tiền vẫn 'treo' chưa đến tài khoản NCC." },
   completed:    { id: "completed",    label: "Hoàn tất thanh toán",   icon: "✅", color: "#3E8E3E", bg: "#E8F3E8", short: "Hoàn tất",
                    description: "NCC xác nhận đã nhận đủ tiền. Công nợ NCC giảm tương ứng. KHÔNG thể quay lui từ trạng thái này." },
 };
-// 2 stage "treo" — tiền đã rời GoChek nhưng NCC chưa nhận
+// 2 stage "treo" — tiền đã rời GC nhưng NCC chưa nhận
 const PAYMENT_PENDING_STAGES = ["carrier", "transferring"];
 const PAYMENT_STAGE_ORDER = ["carrier", "transferring", "completed"];
 
@@ -1704,7 +1704,7 @@ const ROLE_LABELS = {
 // v32: Reset toàn bộ dữ liệu test → bắt đầu từ 1 admin user.
 // Chị tự tạo user thật qua tab Cấu hình → Tài khoản (đổi mật khẩu mặc định ngay sau lần đầu đăng nhập).
 const SEED_USERS = [
-  { id: "u1", username: "admin", password: "gochek2026", fullName: "Đoàn Thị Liễu", email: "", role: "admin", status: "active", createdAt: "2026-01-01" },
+  { id: "u1", username: "admin", password: "GC2026", fullName: "Đoàn Thị Liễu", email: "", role: "admin", status: "active", createdAt: "2026-01-01" },
 ];
 
 // v32: Xóa toàn bộ NCC test → tạo NCC thật qua Cấu hình → Nhà cung cấp
@@ -2097,7 +2097,7 @@ const calcWarrantyPendingValueCNY = (market, warranties, products, settings) => 
 // Trả về danh sách { shipment, factory, dueDate, daysUntilDue, valueCNY, valueRemainCNY, urgency }
 //   urgency: "overdue" (đã quá hạn), "urgent" (≤7 ngày), "warning" (≤14 ngày), null (chưa cần lo)
 // v33: Các trạng thái shipment "đã rời nhà máy" → đã phát sinh công nợ NCC
-// Theo nghiệp vụ GoChek: chỉ phát sinh công nợ khi hàng đã xuất khỏi nhà máy.
+// Theo nghiệp vụ GC: chỉ phát sinh công nợ khi hàng đã xuất khỏi nhà máy.
 // Nháp và Hủy không tính. Các status còn lại đều đã ra khỏi NM → đã có công nợ.
 const SHIPMENT_LEFT_FACTORY = ["Chờ xuất", "Đang vận chuyển TQ", "Đang vận chuyển", "Đang thông quan", "Kiểm hoá", "Đã thông quan", "Đã về kho"];
 // v33: Các trạng thái shipment đang trên đường (đã rời NM, chưa về kho TT)
@@ -3458,7 +3458,7 @@ const exportAccountingReport = async ({ factory, pos, shipments, payments, feePa
   pushMoneyRow("(4) Tham chiếu — Hàng đã NHẬN về kho", periodReceivedValue, "Để đối chiếu hao hụt với (3)");
   pushMoneyRow("(5) ✅ Thanh toán: Thị trường → NCC (chỉ stage Hoàn tất)", marketToFactoryIn, `v38: chỉ payment đã hoàn tất. Stage 1+2 xem dòng (5b)`);
   // v38: Dòng mới cho Đang TT
-  pushMoneyRow("(5b) 🟡 Đang TT (stage 🏦 + 🌐) — chưa giảm công nợ", pendingPaid, "Tiền GoChek đã chuyển nhưng NCC chưa nhận — không trừ vào nợ");
+  pushMoneyRow("(5b) 🟡 Đang TT (stage 🏦 + 🌐) — chưa giảm công nợ", pendingPaid, "Tiền GC đã chuyển nhưng NCC chưa nhận — không trừ vào nợ");
   pushMoneyRow("(6) Thanh toán: Liên NM — vào (NCC khác trả hộ)", interFactoryIn, "Chuyển nợ từ NCC khác sang");
   pushMoneyRow("(7) Thanh toán: Liên NM — ra (NCC này trả hộ)", interFactoryOut, "NCC này trả hộ NCC khác");
   pushMoneyRow("(8) Thanh toán ròng = (5)+(6)−(7)", netPaid, "Chỉ tính stage Hoàn tất ✅");
@@ -6064,7 +6064,7 @@ const LoginScreen = ({ onLogin, users }) => {
       <div style={{ width: 420, background: C.white, borderRadius: 24, padding: 44, boxShadow: "0 20px 60px rgba(30, 60, 30, 0.15)" }}>
         <div style={{ textAlign: "center", marginBottom: 36 }}>
           <div style={{ width: 72, height: 72, borderRadius: 18, background: `linear-gradient(135deg, ${C.green400} 0%, ${C.green600} 100%)`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 18px", color: "white", fontSize: 32, fontWeight: 800, boxShadow: `0 8px 20px ${C.green500}40` }}>G</div>
-          <div style={{ fontSize: 26, color: C.green800, fontWeight: 800, letterSpacing: "-0.02em" }}>GoChek CRM</div>
+          <div style={{ fontSize: 26, color: C.green800, fontWeight: 800, letterSpacing: "-0.02em" }}>GC CRM</div>
           <div style={{ fontSize: 13, color: C.textMuted, marginTop: 6 }}>Hệ thống quản lý nhà máy</div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -6678,7 +6678,7 @@ const KpiExplanationAccordion = () => {
     {
       icon: "🟡",
       label: "Đang TT (treo)",
-      definition: "Tổng tiền GoChek đã chuyển ra (cho carrier hoặc đang chuyển QT) nhưng NCC CHƯA xác nhận nhận được. Đây là tiền \"lơ lửng\" giữa GoChek và NCC.",
+      definition: "Tổng tiền GC đã chuyển ra (cho carrier hoặc đang chuyển QT) nhưng NCC CHƯA xác nhận nhận được. Đây là tiền \"lơ lửng\" giữa GC và NCC.",
       formula: "= Σ payment.amountInVND của payment stage \"carrier\" 🏦 + \"transferring\" 🌐 (đã loại cancelled). INTER_FACTORY không tính.",
       note: "🆕 V38: Stage 1 & 2 không giảm \"Còn phải trả\" của NCC, chỉ chuyển sang sau khi user bấm \"Hoàn tất\". Cảnh báo nếu treo > 4 ngày."
     },
@@ -6687,7 +6687,7 @@ const KpiExplanationAccordion = () => {
       label: "Còn phải trả",
       definition: "Số tiền thực tế còn nợ NCC tại thời điểm xem.",
       formula: "= Hàng đã ship (đang VC + đã về kho) + Nợ đầu kỳ − Đã thanh toán (chỉ stage Hoàn tất ✅) − Quỹ TD đầu kỳ (tối thiểu 0)",
-      note: "🆕 V38: KHÔNG trừ tiền đang ở stage 1+2 (mặc dù tiền đã ra khỏi GoChek). Chỉ trừ khi NCC xác nhận nhận tiền (stage 3)."
+      note: "🆕 V38: KHÔNG trừ tiền đang ở stage 1+2 (mặc dù tiền đã ra khỏi GC). Chỉ trừ khi NCC xác nhận nhận tiền (stage 3)."
     },
     {
       icon: "🟩",
@@ -6804,7 +6804,7 @@ const ProductForm = ({ initial, factories, markets = [], settings, onSave, onCre
     imageUrl: "", factoryId: factories[0]?.id || "", unitPrice: "", currency: "CNY", unit: "cái", description: "", cost: "",
     lengthCm: "", widthCm: "", heightCm: "", qtyPerCarton: "",
     warehouseThresholds: {}, // v23: ngưỡng cảnh báo tồn kho theo từng kho
-    externalSkus: {}, // v23b: SKU bên các phần mềm bán hàng — { nhanh: "S2402", pancake: "GoChek S24-02" }
+    externalSkus: {}, // v23b: SKU bên các phần mềm bán hàng — { nhanh: "S2402", pancake: "GC S24-02" }
   });
   const [imgMode, setImgMode] = useState("url"); // url | upload
   const [showNewCat, setShowNewCat] = useState(false); // v11.2: popup tạo category
@@ -7006,7 +7006,7 @@ const ProductForm = ({ initial, factories, markets = [], settings, onSave, onCre
                       ...prev,
                       externalSkus: { ...(prev.externalSkus || {}), [p.id]: e.target.value },
                     }))}
-                    placeholder={p.id === "nhanh" ? "VD: S2402" : "VD: GoChek S24-02"}
+                    placeholder={p.id === "nhanh" ? "VD: S2402" : "VD: GC S24-02"}
                     style={{ fontSize: 12 }}
                   />
                 </div>
@@ -7063,7 +7063,7 @@ const ImportProductsModal = ({ products, factories, settings, onConfirm, onClose
       ["S26-01", "Ultra S26 Wireless Mic", "Wireless Microphone Model S26-01",
         factories[0]?.supplierCode || "NCC-001", "", 75, "CNY", "", "cái", "Micro",
         "Mic không dây thế hệ mới", 16, 11, 5, 40, ""],
-      ["G2", "GoChek G2 Earphone", "TWS Earphone G2",
+      ["G2", "GC G2 Earphone", "TWS Earphone G2",
         factories[0]?.supplierCode || "NCC-001", "", 65, "CNY", "", "cái", "Tai nghe",
         "", 8, 6, 3, 80, ""],
     ]);
@@ -7112,7 +7112,7 @@ const ImportProductsModal = ({ products, factories, settings, onConfirm, onClose
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, productSheet, "Sản phẩm");
     XLSX.utils.book_append_sheet(wb, guideSheet, "Hướng dẫn");
-    const fname = `Template_SanPham_GoChek_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    const fname = `Template_SanPham_GC_${new Date().toISOString().slice(0, 10)}.xlsx`;
     XLSX.writeFile(wb, fname);
   };
 
@@ -11391,7 +11391,7 @@ const ImportStockModal = ({ markets, products, openingStock, stockMovements, def
     ]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Template");
-    XLSX.writeFile(wb, "Template_tonkho_GoChek.xlsx");
+    XLSX.writeFile(wb, "Template_tonkho_GC.xlsx");
   };
 
   // Confirm — sinh batch + movements/openings
@@ -11816,7 +11816,7 @@ const Help = ({ user }) => {
   return (
     <div>
       <SectionHeader title="📚 Hướng dẫn sử dụng"
-        subtitle={`Tài liệu hướng dẫn GoChek CRM · ${allItems.length} mục · Click vào sidebar bên trái để xem`}
+        subtitle={`Tài liệu hướng dẫn GC CRM · ${allItems.length} mục · Click vào sidebar bên trái để xem`}
       />
 
       {/* Search bar */}
@@ -12348,7 +12348,7 @@ const Debts = ({ pos, shipments, payments, factories, openingBalances, settings,
                   {
                     // v38: Cột mới — Đang TT (stage 1+2)
                     label: "🟡 Đang TT", val: r.pendingPaidCNY || 0, color: C.orange, bg: C.orangeBg, show: (r.pendingPaidCNY || 0) > 0,
-                    note: "Tiền GoChek đã chuyển nhưng NCC chưa nhận (stage 1+2)"
+                    note: "Tiền GC đã chuyển nhưng NCC chưa nhận (stage 1+2)"
                   },
                   {
                     label: "Còn phải trả", val: r.stillOwed, color: r.stillOwed > 0 ? C.red : C.green600, bg: r.stillOwed > 0 ? C.redBg : C.green50, show: true,
@@ -12567,7 +12567,7 @@ const MarketDebts = ({ pos, shipments, payments, factories, markets, settings, p
       />
 
       <div className="alert alert-info" style={{ marginBottom: 16 }}>
-        <b>Cách tính Còn phải trả (v38):</b> Hàng đã ship − Đã thanh toán (chỉ stage <b>Hoàn tất</b> ✅) − <b>Đang TT</b> (stage 🏦 + 🌐, tiền GoChek đã chuyển nhưng NCC chưa nhận) − Hàng đang BH (treo). Tiền ở stage "Đã chuyển uỷ thác" hoặc "Đang chuyển QT" được tách riêng vào cột "🟡 Đang TT" — chưa giảm "Còn phải trả" của TT cho đến khi NCC xác nhận nhận tiền.
+        <b>Cách tính Còn phải trả (v38):</b> Hàng đã ship − Đã thanh toán (chỉ stage <b>Hoàn tất</b> ✅) − <b>Đang TT</b> (stage 🏦 + 🌐, tiền GC đã chuyển nhưng NCC chưa nhận) − Hàng đang BH (treo). Tiền ở stage "Đã chuyển uỷ thác" hoặc "Đang chuyển QT" được tách riêng vào cột "🟡 Đang TT" — chưa giảm "Còn phải trả" của TT cho đến khi NCC xác nhận nhận tiền.
       </div>
 
       {/* v38: KPI 6 thẻ — thêm "🟡 Đang TT" giữa "Đã thanh toán" và "Hàng đang BH" */}
@@ -14325,7 +14325,7 @@ const OpeningBalances = ({ openingBalances, factories, markets = [], settings, o
       />
 
       {/* v38i: Banner cảnh báo migration — chỉ hiện 1 lần khi user mở tab sau khi update */}
-      {migrationFlag && oldOBCount > 0 && (
+      {/* {migrationFlag && oldOBCount > 0 && (
         <div className="alert alert-warn" style={{ marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
           <div>
             <div style={{ fontWeight: 700, marginBottom: 4 }}>⚠️ Cập nhật V38i — Schema công nợ đầu kỳ đã thay đổi</div>
@@ -14336,7 +14336,7 @@ const OpeningBalances = ({ openingBalances, factories, markets = [], settings, o
           </div>
           <button className="btn btn-ghost" style={{ padding: "4px 10px", fontSize: 11 }} onClick={onMigrationDismiss}>Đã hiểu, ẩn cảnh báo</button>
         </div>
-      )}
+      )} */}
 
       {!canManage && <div className="alert alert-warn" style={{ marginBottom: 16 }}>Chỉ Admin/Kế toán được quản lý công nợ đầu kỳ</div>}
 
@@ -15154,7 +15154,7 @@ export default function App() {
         });
         if (orphanOpeningCount > 0 || orphanMovementCount > 0) {
           // Cảnh báo nhẹ trong console (không alert vì migration chạy 1 lần, không nên làm phiền user)
-          console.warn(`[GoChek CRM v31] Đã tự động dọn dẹp: ${orphanOpeningCount} bản ghi đầu kỳ + ${orphanMovementCount} biến động kho có warehouseId không tồn tại.`);
+          console.warn(`[GC CRM v31] Đã tự động dọn dẹp: ${orphanOpeningCount} bản ghi đầu kỳ + ${orphanMovementCount} biến động kho có warehouseId không tồn tại.`);
         }
 
         // Auto rebuild AUTO movements từ shipments + warranties
@@ -15181,7 +15181,7 @@ export default function App() {
           };
         });
         if (backfilledPayments > 0) {
-          console.info(`[GoChek CRM v34] Đã backfill tỷ giá cho ${backfilledPayments} payment cũ (dùng tỷ giá hệ thống hiện tại).`);
+          console.info(`[GC CRM v34] Đã backfill tỷ giá cho ${backfilledPayments} payment cũ (dùng tỷ giá hệ thống hiện tại).`);
         }
 
         // v38: Backfill paymentStage + stageHistory cho payment cũ.
@@ -15201,7 +15201,7 @@ export default function App() {
           };
         });
         if (backfilledStages > 0) {
-          console.info(`[GoChek CRM v38] Đã backfill paymentStage="completed" cho ${backfilledStages} payment cũ.`);
+          console.info(`[GC CRM v38] Đã backfill paymentStage="completed" cho ${backfilledStages} payment cũ.`);
         }
 
         // v38: Backfill paymentStageThresholds trong settings nếu chưa có
@@ -15219,7 +15219,7 @@ export default function App() {
           saved.openingBalances = [];
           saved._v38i_migrated = true;
           saved._v38i_oldOBCount = oldOBCount; // lưu để hiển thị banner cảnh báo
-          console.warn(`[GoChek CRM v38i] HARD MIGRATION: Đã xóa ${oldOBCount} công nợ đầu kỳ cũ. Vui lòng nhập lại theo schema TT × NCC mới.`);
+          console.warn(`[GC CRM v38i] HARD MIGRATION: Đã xóa ${oldOBCount} công nợ đầu kỳ cũ. Vui lòng nhập lại theo schema TT × NCC mới.`);
         }
 
         setData(d => ({ ...d, ...saved }));
@@ -15730,7 +15730,7 @@ export default function App() {
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <div style={{ width: 42, height: 42, borderRadius: 12, background: `linear-gradient(135deg, ${C.green400} 0%, ${C.green600} 100%)`, display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontSize: 22, fontWeight: 800 }}>G</div>
               <div>
-                <div style={{ fontSize: 17, fontWeight: 800, color: "white" }}>GoChek</div>
+                <div style={{ fontSize: 17, fontWeight: 800, color: "white" }}>GC</div>
                 <div style={{ fontSize: 10, color: "rgba(255,255,255,0.5)", letterSpacing: "0.1em", marginTop: 2 }}>FACTORY CRM</div>
               </div>
             </div>
