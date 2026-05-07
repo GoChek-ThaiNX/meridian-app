@@ -1,6 +1,6 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import App from './GoChek_CRM_V41.jsx'
+import App from './GoChek_CRM_V42.jsx'
 import './index.css'
 import { initDevToolsGuard } from './devtools-guard.js'
 
