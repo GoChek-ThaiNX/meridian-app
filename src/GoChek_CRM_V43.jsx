@@ -17509,14 +17509,19 @@ export default function App() {
     setUser(loggedUser);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    let finalData = data;
     if (user) {
       const log = logAudit("logout", user.username, user);
-      const logoutData = { ...data, auditLog: [...data.auditLog, log] };
-      // v43: Flush ngay lập tức lên S3 (không debounce) để tránh mất data khi login lại
-      setData(logoutData);
-      s3Flush(logoutData);
+      finalData = {
+        ...data,
+        auditLog: [...data.auditLog, log],
+        stockMovements: rebuildAutoMovements(data.shipments || [], data.warranties || [], data.stockMovements || []),
+      };
+      setData(finalData);
     }
+    // v43: Sync — flush debounce pending, rồi PUT ngay lập tức lên S3
+    s3Flush(finalData);
     // v38g: Xóa session khỏi localStorage
     try {
       localStorage.removeItem("crm_session_v38g");
