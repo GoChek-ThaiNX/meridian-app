@@ -17512,7 +17512,10 @@ export default function App() {
   const handleLogout = () => {
     if (user) {
       const log = logAudit("logout", user.username, user);
-      save({ ...data, auditLog: [...data.auditLog, log] });
+      const logoutData = { ...data, auditLog: [...data.auditLog, log] };
+      // v43: Flush ngay lập tức lên S3 (không debounce) để tránh mất data khi login lại
+      setData(logoutData);
+      s3Flush(logoutData);
     }
     // v38g: Xóa session khỏi localStorage
     try {
