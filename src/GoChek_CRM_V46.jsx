@@ -17829,6 +17829,7 @@ export default function App() {
             const raw = localStorage.getItem(`crm_data_${v}`);
             if (raw) { saved = JSON.parse(raw); migratedFrom = v; break; }
           } catch {}
+        }
         if (migratedFrom) console.info(`[GoChek CRM] Migrating data from ${migratedFrom} → v38 schema`);
       }
 
