@@ -5,9 +5,9 @@
 // UI chỉ gọi các method ở đây, không tự xử lý data persistence
 // ============================================================
 
-const S3_BUCKET = "debt-order-management";
+const S3_BUCKET = "debt-order-management-prod";
 const S3_REGION = "ap-southeast-1";
-const S3_KEY = "crm_data_v12.json";
+const S3_KEY = "crm_data.json";
 const S3_URL = `https://${S3_BUCKET}.s3.${S3_REGION}.amazonaws.com/${S3_KEY}`;
 
 let _saveTimer = null;
