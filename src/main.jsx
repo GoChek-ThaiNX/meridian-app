@@ -6,7 +6,7 @@ import { initDevToolsGuard } from './devtools-guard.js'
 
 // Chỉ bật guard ở production
 if (import.meta.env.PROD) {
-  initDevToolsGuard();
+  // initDevToolsGuard();
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(
