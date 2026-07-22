@@ -19646,7 +19646,7 @@ export default function App() {
           } else {
             // Tìm user trong data
             const dataToCheck = saved || (await loadAll());
-            const users = dataToCheck?.users || SEED_USERS;
+            const users = alive(dataToCheck?.users || SEED_USERS);
             const sessionUser = users.find(u => u.id === session.userId);
             if (!sessionUser) {
               // User không còn tồn tại (admin đã hard delete)
@@ -19835,8 +19835,17 @@ export default function App() {
       confirmLabel: "Xóa",
       danger: true,
       onConfirm: () => {
-        const newLog = addAuditLog(`delete_${actionLabel(key)}`, id);
-        save({ ...data, [key]: data[key].filter(x => x.id !== id), auditLog: newLog });
+        const now = new Date().toISOString();
+        const deletedBy = user?.id || user?.username || "unknown";
+        const newLog = addAuditLog(`delete_${actionLabel(key)}`, id, { deletedAt: now, deletedBy });
+        save({
+          ...data,
+          [key]: (data[key] || []).map(x => x.id === id
+            ? { ...x, deleted: true, deletedAt: now, deletedBy }
+            : x
+          ),
+          auditLog: newLog,
+        });
       },
     });
   };
@@ -19859,10 +19868,15 @@ export default function App() {
       shipments: "hard_delete_shipment",
     };
     const action = actionMap[key] || `hard_delete_${key}`;
-    const newLog = addAuditLog(action, id, { snapshot: entity });
+    const now = new Date().toISOString();
+    const deletedBy = user?.id || user?.username || "admin";
+    const newLog = addAuditLog(action, id, { deletedAt: now, deletedBy, snapshot: entity });
     save({
       ...data,
-      [key]: (data[key] || []).filter(x => x.id !== id),
+      [key]: (data[key] || []).map(x => x.id === id
+        ? { ...x, deleted: true, deletedAt: now, deletedBy, hardDeleted: true, hardDeletedAt: now, hardDeletedBy: deletedBy }
+        : x
+      ),
       auditLog: newLog,
     });
   };
@@ -20442,8 +20456,27 @@ export default function App() {
     });
   };
 
+  const activeData = useMemo(() => ({
+    ...data,
+    factories: alive(data.factories),
+    products: alive(data.products),
+    pos: alive(data.pos),
+    shipments: alive(data.shipments),
+    payments: alive(data.payments),
+    users: alive(data.users),
+    markets: alive(data.markets),
+    carriers: alive(data.carriers),
+    openingBalances: alive(data.openingBalances),
+    feePayments: alive(data.feePayments),
+    warranties: alive(data.warranties),
+    openingStock: alive(data.openingStock),
+    stockImportBatches: alive(data.stockImportBatches),
+    stockOnHand: alive(data.stockOnHand),
+    marketTransfers: alive(data.marketTransfers),
+  }), [data]);
+
   if (!loaded) return <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: C.bg, color: C.textMuted }}>Đang tải...</div>;
-  if (!user) return <><style>{css}</style><LoginScreen onLogin={handleLogin} users={data.users} /></>;
+  if (!user) return <><style>{css}</style><LoginScreen onLogin={handleLogin} users={activeData.users} /></>;
 
   const currentTab = TABS.find(t => t.id === tab);
   const availableTabs = TABS.filter(t => !t.perm || can(user, t.perm));
@@ -20510,7 +20543,7 @@ export default function App() {
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
               <div style={{ fontSize: 12, color: C.textMuted }}>
-                💱 1 CNY = <b>{data.settings.cnyToVnd.toLocaleString("vi-VN")}</b> VND
+                💱 1 CNY = <b>{activeData.settings.cnyToVnd.toLocaleString("vi-VN")}</b> VND
               </div>
               <div style={{ fontSize: 12, color: C.textMuted }}>
                 {new Date().toLocaleDateString("vi-VN", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
@@ -20519,21 +20552,21 @@ export default function App() {
           </div>
 
           <div style={{ padding: 28, flex: 1 }}>
-            {tab === "dashboard" && <Dashboard pos={data.pos} shipments={data.shipments} payments={data.payments} factories={data.factories} products={data.products} openingBalances={data.openingBalances} markets={data.markets} carriers={data.carriers} feePayments={data.feePayments} stockOnHand={data.stockOnHand} settings={data.settings} onNavigate={setTab} />}
-            {tab === "products" && <Products products={data.products} pos={data.pos} shipments={data.shipments} factories={data.factories} markets={data.markets} settings={data.settings} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} onSaveSettings={onSaveSettings} onImportProducts={onImportProducts} onUpdateProductTargets={onUpdateProductTargets} user={user} />}
-            {tab === "pos" && <POs pos={data.pos} factories={data.factories} products={data.products} shipments={data.shipments} markets={data.markets} settings={data.settings} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} onHardDelete={onHardDelete} onRenameId={onRenameId} data={data} onConfirm={setConfirmDialog} prefill={poPrefill} onClearPrefill={() => setPoPrefill(null)} user={user} />}
-            {tab === "shipments" && <Shipments shipments={data.shipments} pos={data.pos} factories={data.factories} products={data.products} feePayments={data.feePayments} markets={data.markets} carriers={data.carriers} settings={data.settings} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} onHardDelete={onHardDelete} onRenameId={onRenameId} data={data} onCreateWarehouse={onCreateWarehouse} onCreateMarketTransfer={onCreateMarketTransfer} onDeleteMarketTransfer={onDeleteMarketTransfer} prefill={shipmentPrefill} onClearPrefill={() => setShipmentPrefill(null)} user={user} />}
-            {tab === "warranties" && <Warranties warranties={data.warranties || []} factories={data.factories} markets={data.markets} products={data.products} settings={data.settings} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} user={user} />}
+            {tab === "dashboard" && <Dashboard pos={activeData.pos} shipments={activeData.shipments} payments={activeData.payments} factories={activeData.factories} products={activeData.products} openingBalances={activeData.openingBalances} markets={activeData.markets} carriers={activeData.carriers} feePayments={activeData.feePayments} stockOnHand={activeData.stockOnHand} settings={activeData.settings} onNavigate={setTab} />}
+            {tab === "products" && <Products products={activeData.products} pos={activeData.pos} shipments={activeData.shipments} factories={activeData.factories} markets={activeData.markets} settings={activeData.settings} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} onSaveSettings={onSaveSettings} onImportProducts={onImportProducts} onUpdateProductTargets={onUpdateProductTargets} user={user} />}
+            {tab === "pos" && <POs pos={activeData.pos} factories={activeData.factories} products={activeData.products} shipments={activeData.shipments} markets={activeData.markets} settings={activeData.settings} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} onHardDelete={onHardDelete} onRenameId={onRenameId} data={activeData} onConfirm={setConfirmDialog} prefill={poPrefill} onClearPrefill={() => setPoPrefill(null)} user={user} />}
+            {tab === "shipments" && <Shipments shipments={activeData.shipments} pos={activeData.pos} factories={activeData.factories} products={activeData.products} feePayments={activeData.feePayments} markets={activeData.markets} carriers={activeData.carriers} settings={activeData.settings} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} onHardDelete={onHardDelete} onRenameId={onRenameId} data={activeData} onCreateWarehouse={onCreateWarehouse} onCreateMarketTransfer={onCreateMarketTransfer} onDeleteMarketTransfer={onDeleteMarketTransfer} prefill={shipmentPrefill} onClearPrefill={() => setShipmentPrefill(null)} user={user} />}
+            {tab === "warranties" && <Warranties warranties={activeData.warranties || []} factories={activeData.factories} markets={activeData.markets} products={activeData.products} settings={activeData.settings} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} user={user} />}
             {tab === "inventory" && <Inventory
-              products={data.products}
-              openingStock={data.openingStock || []}
+              products={activeData.products}
+              openingStock={activeData.openingStock || []}
               stockMovements={data.stockMovements || []}
-              stockImportBatches={data.stockImportBatches || []}
-              stockOnHand={data.stockOnHand || []}
-              pos={data.pos || []}
-              shipments={data.shipments || []}
-              markets={data.markets}
-              settings={data.settings}
+              stockImportBatches={activeData.stockImportBatches || []}
+              stockOnHand={activeData.stockOnHand || []}
+              pos={activeData.pos || []}
+              shipments={activeData.shipments || []}
+              markets={activeData.markets}
+              settings={activeData.settings}
               onImportSave={onImportSave}
               onCancelBatch={onCancelImportBatch}
               onUpsertStockOnHand={onUpsertStockOnHand}
@@ -20543,13 +20576,13 @@ export default function App() {
               onUpdateProductTargets={onUpdateProductTargets}
               user={user}
             />}
-            {tab === "fees" && <ImportFees shipments={data.shipments} feePayments={data.feePayments} markets={data.markets} carriers={data.carriers} settings={data.settings} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} user={user} />}
-            {tab === "debts" && <Debts pos={data.pos} shipments={data.shipments} payments={data.payments} factories={data.factories} openingBalances={data.openingBalances} settings={data.settings} feePayments={data.feePayments} products={data.products} carriers={data.carriers} markets={data.markets} user={user} />}
-            {tab === "market_debts" && <MarketDebts pos={data.pos} shipments={data.shipments} payments={data.payments} factories={data.factories} markets={data.markets} settings={data.settings} products={data.products} warranties={data.warranties} openingBalances={data.openingBalances} marketTransfers={data.marketTransfers || []} user={user} />}
-            {tab === "opening_balance" && <OpeningBalances openingBalances={data.openingBalances} factories={data.factories} markets={data.markets} settings={data.settings} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} user={user} />}
-            {tab === "payments" && <Payments pos={data.pos} shipments={data.shipments} payments={data.payments} factories={data.factories} openingBalances={data.openingBalances} markets={data.markets} carriers={data.carriers || []} settings={data.settings} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} onCreateViaFactoryPayment={onCreateViaFactoryPayment} onCancelViaFactoryPayment={onCancelViaFactoryPayment} onChangeViaFactoryStage={onChangeViaFactoryStage} user={user} />}
+            {tab === "fees" && <ImportFees shipments={activeData.shipments} feePayments={activeData.feePayments} markets={activeData.markets} carriers={activeData.carriers} settings={activeData.settings} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} user={user} />}
+            {tab === "debts" && <Debts pos={activeData.pos} shipments={activeData.shipments} payments={activeData.payments} factories={activeData.factories} openingBalances={activeData.openingBalances} settings={activeData.settings} feePayments={activeData.feePayments} products={activeData.products} carriers={activeData.carriers} markets={activeData.markets} user={user} />}
+            {tab === "market_debts" && <MarketDebts pos={activeData.pos} shipments={activeData.shipments} payments={activeData.payments} factories={activeData.factories} markets={activeData.markets} settings={activeData.settings} products={activeData.products} warranties={activeData.warranties} openingBalances={activeData.openingBalances} marketTransfers={activeData.marketTransfers || []} user={user} />}
+            {tab === "opening_balance" && <OpeningBalances openingBalances={activeData.openingBalances} factories={activeData.factories} markets={activeData.markets} settings={activeData.settings} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} user={user} />}
+            {tab === "payments" && <Payments pos={activeData.pos} shipments={activeData.shipments} payments={activeData.payments} factories={activeData.factories} openingBalances={activeData.openingBalances} markets={activeData.markets} carriers={activeData.carriers || []} settings={activeData.settings} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} onCreateViaFactoryPayment={onCreateViaFactoryPayment} onCancelViaFactoryPayment={onCancelViaFactoryPayment} onChangeViaFactoryStage={onChangeViaFactoryStage} user={user} />}
             {tab === "audit" && <AuditLog auditLog={data.auditLog} />}
-            {tab === "configuration" && <Configuration data={data} user={user} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} onHardDelete={onHardDelete} onSaveSettings={onSaveSettings} onCreateWarehouse={onCreateWarehouse} />}
+            {tab === "configuration" && <Configuration data={activeData} user={user} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} onHardDelete={onHardDelete} onSaveSettings={onSaveSettings} onCreateWarehouse={onCreateWarehouse} />}
             {tab === "help" && <Help user={user} />}
           </div>
         </div>

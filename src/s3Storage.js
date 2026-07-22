@@ -31,20 +31,90 @@ export async function s3Get() {
   }
 }
 
-function validateBeforeSave(data) {
+const REQUIRED_KEYS = ["factories", "products", "pos", "shipments", "payments", "users", "settings"];
+const PROTECTED_COLLECTION_KEYS = [
+  "factories",
+  "products",
+  "pos",
+  "shipments",
+  "payments",
+  "users",
+  "markets",
+  "carriers",
+  "openingBalances",
+  "feePayments",
+  "warranties",
+  "openingStock",
+  "stockImportBatches",
+  "stockOnHand",
+  "marketTransfers",
+];
+
+function itemIdentity(item) {
+  return item?.id || item?.username || item?.sku || null;
+}
+
+function validateShapeBeforeSave(data) {
   if (!data || typeof data !== "object") return { ok: false, reason: "Data is null or not an object" };
-  const requiredKeys = ["factories", "products", "pos", "shipments", "payments", "users", "settings"];
-  for (const key of requiredKeys) {
+  for (const key of REQUIRED_KEYS) {
     if (!(key in data)) return { ok: false, reason: `Missing required key: ${key}` };
   }
+
   const collections = ["factories", "products", "pos", "shipments", "payments", "users"];
-  const totalItems = collections.reduce((s, k) => s + (Array.isArray(data[k]) ? data[k].length : 0), 0);
-  if (totalItems === 0) return { ok: false, reason: "All collections are empty — refusing to overwrite" };
+  for (const key of collections) {
+    if (!Array.isArray(data[key])) return { ok: false, reason: `${key} must be an array` };
+  }
+
+  const totalItems = collections.reduce((s, k) => s + data[k].length, 0);
+  if (totalItems === 0) return { ok: false, reason: "All collections are empty - refusing to overwrite" };
   return { ok: true };
 }
 
+function validateAgainstPreviousSave(nextData, previousData) {
+  if (!previousData || typeof previousData !== "object") return { ok: true };
+
+  for (const key of PROTECTED_COLLECTION_KEYS) {
+    const previousItems = previousData[key];
+    if (!Array.isArray(previousItems) || previousItems.length === 0) continue;
+
+    const nextItems = nextData[key];
+    if (!Array.isArray(nextItems)) {
+      return { ok: false, reason: `${key} disappeared or is no longer an array` };
+    }
+    if (nextItems.length < previousItems.length) {
+      return {
+        ok: false,
+        reason: `${key} shrank from ${previousItems.length} to ${nextItems.length}. Use deleted:true marker instead of removing records.`,
+      };
+    }
+
+    const nextIds = new Set(nextItems.map(itemIdentity).filter(Boolean));
+    for (const item of previousItems) {
+      const id = itemIdentity(item);
+      if (id && !nextIds.has(id)) {
+        return {
+          ok: false,
+          reason: `${key} record '${id}' was removed. Use deleted:true/deletedAt/deletedBy marker instead.`,
+        };
+      }
+    }
+  }
+
+  return { ok: true };
+}
+
+async function validateBeforeSave(data) {
+  const shapeCheck = validateShapeBeforeSave(data);
+  if (!shapeCheck.ok) return shapeCheck;
+
+  const remoteData = await s3Get();
+  if (!remoteData) return { ok: true };
+
+  return validateAgainstPreviousSave(data, remoteData);
+}
+
 export async function s3Put(data) {
-  const check = validateBeforeSave(data);
+  const check = await validateBeforeSave(data);
   if (!check.ok) {
     console.error("[S3] BLOCKED save:", check.reason);
     return false;
@@ -71,12 +141,7 @@ export function s3PutDebounced(data) {
 
 export function s3Flush(data) {
   if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
-  if (navigator.sendBeacon) {
-    const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
-    navigator.sendBeacon(S3_URL, blob);
-  } else {
-    s3Put(data);
-  }
+  s3Put(data);
 }
 
 // ============================================================
