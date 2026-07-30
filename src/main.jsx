@@ -1,6 +1,6 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import App from './GoChek_CRM_V51.jsx'
+import GCBCKDApp from './GCBCKDApp.v21.jsx'
 import './index.css'
 import { initDevToolsGuard } from './devtools-guard.js'
 
@@ -11,6 +11,6 @@ if (import.meta.env.PROD) {
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <App />
+    <GCBCKDApp />
   </React.StrictMode>,
 )
