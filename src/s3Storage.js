@@ -1,180 +1,25 @@
 // ============================================================
-// S3 Data Layer - GC BCKD v21
-// Bucket: report-management-prod | Region: ap-southeast-1
-//
-// App state is stored as one JSON object. Uploaded source files are
-// stored separately as base64 text objects and mirrored to browser
-// storage so the app can still work when S3 is unavailable.
+// S3 Data Layer — GoChek CRM v12
+// Bucket: debt-order-management | Region: ap-southeast-1
+// Toàn bộ CRM data = 1 JSON file trên S3
+// UI chỉ gọi các method ở đây, không tự xử lý data persistence
 // ============================================================
 
-export const STORAGE_KEY = "gochek_v5";
-
-const S3_BUCKET = "report-management-prod";
+const S3_BUCKET = "debt-order-management-prod";
 const S3_REGION = "ap-southeast-1";
-const S3_DATA_KEY = "report_data.json";
-const S3_FILE_PREFIX = "gcbckd_files";
-const S3_BASE_URL = `https://${S3_BUCKET}.s3.${S3_REGION}.amazonaws.com`;
-const S3_DATA_URL = `${S3_BASE_URL}/${S3_DATA_KEY}`;
-
-const FILE_KEY_PREFIX = "gcfile_";
-const DEBOUNCE_MS = 1500;
-const AUTO_SYNC_INTERVAL = 2 * 60 * 1000;
+const S3_KEY = "crm_data.json";
+const S3_URL = `https://${S3_BUCKET}.s3.${S3_REGION}.amazonaws.com/${S3_KEY}`;
 
 let _saveTimer = null;
-let _syncTimer = null;
-let _lastSyncedJSON = null;
-const _memStore = {};
-
-const hasLocalStorage = () => typeof localStorage !== "undefined";
-const hasClaudeStorage = () =>
-  typeof window !== "undefined" &&
-  window.storage &&
-  typeof window.storage.get === "function";
-
-const safeJsonParse = (value) => {
-  try {
-    return value ? JSON.parse(value) : null;
-  } catch {
-    return null;
-  }
-};
-
-const clone = (value) => safeJsonParse(JSON.stringify(value));
-
-const bckdArrayKeys = [
-  "groups",
-  "sources",
-  "markets",
-  "companies",
-  "channels",
-  "cats",
-  "users",
-  "products",
-  "logs",
-];
-
-const bckdObjectKeys = [
-  "rates",
-  "skuMap",
-  "catMap",
-  "colMap",
-  "costHint",
-  "combos",
-  "bankAccounts",
-  "entries",
-  "stock",
-  "orderIds",
-];
-
-function isPlainObject(value) {
-  return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
-function isBckdState(data) {
-  if (!isPlainObject(data)) return false;
-  if (!Array.isArray(data.companies) || !Array.isArray(data.markets)) return false;
-  if (!Array.isArray(data.channels) || !Array.isArray(data.cats)) return false;
-  if (!Array.isArray(data.users)) return false;
-  if (!isPlainObject(data.entries) || !isPlainObject(data.stock)) return false;
-  return true;
-}
-
-function validateBckdStateBeforeSave(data) {
-  if (!isPlainObject(data)) return { ok: false, reason: "Data is null or not an object" };
-  if (!isBckdState(data)) return { ok: false, reason: "Data is not a GC BCKD state object" };
-
-  for (const key of bckdArrayKeys) {
-    if (!(key in data)) return { ok: false, reason: `Missing required key: ${key}` };
-    if (!Array.isArray(data[key])) return { ok: false, reason: `${key} must be an array` };
-  }
-
-  for (const key of bckdObjectKeys) {
-    if (!(key in data)) return { ok: false, reason: `Missing required key: ${key}` };
-    if (!isPlainObject(data[key])) return { ok: false, reason: `${key} must be an object` };
-  }
-
-  if (data.markets.length === 0) return { ok: false, reason: "markets is empty" };
-  if (data.companies.length === 0) return { ok: false, reason: "companies is empty" };
-  if (data.channels.length === 0) return { ok: false, reason: "channels is empty" };
-  if (data.cats.length === 0) return { ok: false, reason: "cats is empty" };
-  if (!data.users.some((u) => u && u.username && u.role === "admin")) {
-    return { ok: false, reason: "Missing admin user" };
-  }
-
-  return { ok: true };
-}
-
-function newestTimestamp(data) {
-  if (!isPlainObject(data)) return 0;
-  const stamps = [];
-  (data.logs || []).forEach((x) => x && x.at && stamps.push(Date.parse(x.at) || 0));
-  Object.values(data.fileMeta || {}).forEach((x) => x && x.at && stamps.push(Date.parse(x.at) || 0));
-  return Math.max(0, ...stamps);
-}
-
-function fileStorageKey(id) {
-  return `${FILE_KEY_PREFIX}${id}`;
-}
-
-function s3FileUrl(id) {
-  return `${S3_BASE_URL}/${S3_FILE_PREFIX}/${encodeURIComponent(fileStorageKey(id))}.txt`;
-}
-
-function cacheSetRaw(key, value) {
-  _memStore[key] = value;
-  try {
-    if (hasLocalStorage()) localStorage.setItem(key, value);
-  } catch {}
-}
-
-function cacheGetRaw(key) {
-  try {
-    if (hasLocalStorage()) {
-      const value = localStorage.getItem(key);
-      if (value != null) return value;
-    }
-  } catch {}
-  return _memStore[key] || null;
-}
-
-function cacheRemove(key) {
-  delete _memStore[key];
-  try {
-    if (hasLocalStorage()) localStorage.removeItem(key);
-  } catch {}
-}
-
-async function claudeGetRaw(key) {
-  if (!hasClaudeStorage()) return null;
-  try {
-    const r = await window.storage.get(key);
-    return r && r.value != null ? r.value : null;
-  } catch {
-    return null;
-  }
-}
-
-async function claudeSetRaw(key, value) {
-  if (!hasClaudeStorage() || typeof window.storage.set !== "function") return;
-  try {
-    await window.storage.set(key, value);
-  } catch {}
-}
-
-async function claudeDelete(key) {
-  if (!hasClaudeStorage() || typeof window.storage.delete !== "function") return;
-  try {
-    await window.storage.delete(key);
-  } catch {}
-}
+const DEBOUNCE_MS = 1500;
 
 // ============================================================
-// Low-level S3
+// LOW-LEVEL: S3 GET / PUT
 // ============================================================
 
 export async function s3Get() {
   try {
-    const res = await fetch(S3_DATA_URL, { method: "GET", cache: "no-store" });
+    const res = await fetch(S3_URL, { method: "GET", cache: "no-store" });
     if (!res.ok) {
       if (res.status === 404 || res.status === 403) return null;
       throw new Error(`S3 GET failed: ${res.status}`);
@@ -186,22 +31,102 @@ export async function s3Get() {
   }
 }
 
+const REQUIRED_KEYS = ["factories", "products", "pos", "shipments", "payments", "users", "settings"];
+const PROTECTED_COLLECTION_KEYS = [
+  "factories",
+  "products",
+  "pos",
+  "shipments",
+  "payments",
+  "users",
+  "markets",
+  "carriers",
+  "openingBalances",
+  "feePayments",
+  "warranties",
+  "openingStock",
+  "stockImportBatches",
+  "stockOnHand",
+  "marketTransfers",
+];
+
+function itemIdentity(item) {
+  return item?.id || item?.username || item?.sku || null;
+}
+
+function validateShapeBeforeSave(data) {
+  if (!data || typeof data !== "object") return { ok: false, reason: "Data is null or not an object" };
+  for (const key of REQUIRED_KEYS) {
+    if (!(key in data)) return { ok: false, reason: `Missing required key: ${key}` };
+  }
+
+  const collections = ["factories", "products", "pos", "shipments", "payments", "users"];
+  for (const key of collections) {
+    if (!Array.isArray(data[key])) return { ok: false, reason: `${key} must be an array` };
+  }
+
+  const totalItems = collections.reduce((s, k) => s + data[k].length, 0);
+  if (totalItems === 0) return { ok: false, reason: "All collections are empty - refusing to overwrite" };
+  return { ok: true };
+}
+
+function validateAgainstPreviousSave(nextData, previousData) {
+  if (!previousData || typeof previousData !== "object") return { ok: true };
+
+  for (const key of PROTECTED_COLLECTION_KEYS) {
+    const previousItems = previousData[key];
+    if (!Array.isArray(previousItems) || previousItems.length === 0) continue;
+
+    const nextItems = nextData[key];
+    if (!Array.isArray(nextItems)) {
+      return { ok: false, reason: `${key} disappeared or is no longer an array` };
+    }
+    if (nextItems.length < previousItems.length) {
+      return {
+        ok: false,
+        reason: `${key} shrank from ${previousItems.length} to ${nextItems.length}. Use deleted:true marker instead of removing records.`,
+      };
+    }
+
+    const nextIds = new Set(nextItems.map(itemIdentity).filter(Boolean));
+    for (const item of previousItems) {
+      const id = itemIdentity(item);
+      if (id && !nextIds.has(id)) {
+        return {
+          ok: false,
+          reason: `${key} record '${id}' was removed. Use deleted:true/deletedAt/deletedBy marker instead.`,
+        };
+      }
+    }
+  }
+
+  return { ok: true };
+}
+
+async function validateBeforeSave(data) {
+  const shapeCheck = validateShapeBeforeSave(data);
+  if (!shapeCheck.ok) return shapeCheck;
+
+  const remoteData = await s3Get();
+  if (!remoteData) return { ok: true };
+
+  return validateAgainstPreviousSave(data, remoteData);
+}
+
 export async function s3Put(data) {
-  const check = validateBckdStateBeforeSave(data);
+  const check = await validateBeforeSave(data);
   if (!check.ok) {
     console.error("[S3] BLOCKED save:", check.reason);
     return false;
   }
-
   try {
-    const res = await fetch(S3_DATA_URL, {
+    const res = await fetch(S3_URL, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
     if (!res.ok) throw new Error(`S3 PUT failed: ${res.status} ${res.statusText}`);
-    _lastSyncedJSON = JSON.stringify(data);
-    console.log("[S3] Saved GC BCKD state");
+    console.log("[S3] Saved successfully");
     return true;
   } catch (err) {
     console.error("[S3] PUT error:", err.message);
@@ -211,184 +136,245 @@ export async function s3Put(data) {
 
 export function s3PutDebounced(data) {
   if (_saveTimer) clearTimeout(_saveTimer);
-  _saveTimer = setTimeout(() => {
-    _saveTimer = null;
-    s3Put(data);
-  }, DEBOUNCE_MS);
+  _saveTimer = setTimeout(() => { s3Put(data); }, DEBOUNCE_MS);
 }
 
 export function s3Flush(data) {
-  if (_saveTimer) {
-    clearTimeout(_saveTimer);
-    _saveTimer = null;
-  }
-  return data ? s3Put(data) : Promise.resolve(false);
+  if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
+  s3Put(data);
 }
 
 // ============================================================
-// State storage - S3 -> localStorage -> window.storage -> memory
+// STORAGE LAYER — S3 + localStorage cache + fallback
 // ============================================================
 
-export async function loadAll() {
-  const remote = await s3Get();
-  if (isBckdState(remote)) {
-    const json = JSON.stringify(remote);
-    cacheSetRaw(STORAGE_KEY, json);
-    await claudeSetRaw(STORAGE_KEY, json);
-    _lastSyncedJSON = json;
-    return remote;
-  }
-  if (remote && !isBckdState(remote)) {
-    console.warn("[S3] Ignoring non-GC-BCKD report_data.json shape");
-  }
+const _memStore = {};
+const hasClaudeStorage = typeof window !== "undefined" && window.storage && typeof window.storage.get === "function";
 
-  const local = safeJsonParse(cacheGetRaw(STORAGE_KEY));
-  if (isBckdState(local)) return local;
-
-  const claude = safeJsonParse(await claudeGetRaw(STORAGE_KEY));
-  if (isBckdState(claude)) {
-    cacheSetRaw(STORAGE_KEY, JSON.stringify(claude));
-    return claude;
-  }
-
-  return null;
-}
-
-export async function saveAll(data) {
-  const check = validateBckdStateBeforeSave(data);
-  if (!check.ok) {
-    console.error("[Storage] BLOCKED save:", check.reason);
-    return false;
-  }
-
-  const json = JSON.stringify(data);
-  cacheSetRaw(STORAGE_KEY, json);
-  await claudeSetRaw(STORAGE_KEY, json);
-  s3PutDebounced(clone(data));
-  return true;
-}
-
-// ============================================================
-// Uploaded file blobs
-// ============================================================
-
-export async function saveFileBlob(id, b64) {
-  if (!id || !b64) return false;
-  const key = fileStorageKey(id);
-  cacheSetRaw(key, b64);
-  await claudeSetRaw(key, b64);
-
+async function storageGet(key) {
   try {
-    const res = await fetch(s3FileUrl(id), {
-      method: "PUT",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: b64,
-    });
-    if (!res.ok) throw new Error(`S3 file PUT failed: ${res.status}`);
-    return true;
-  } catch (err) {
-    console.warn("[S3] File PUT error, kept local cache:", err.message);
-    return false;
-  }
-}
-
-export async function loadFileBlob(id) {
-  if (!id) return null;
-  const key = fileStorageKey(id);
-
-  const local = cacheGetRaw(key);
-  if (local) return local;
-
-  const claude = await claudeGetRaw(key);
-  if (claude) {
-    cacheSetRaw(key, claude);
-    return claude;
-  }
-
-  try {
-    const res = await fetch(s3FileUrl(id), { method: "GET", cache: "no-store" });
-    if (!res.ok) return null;
-    const b64 = await res.text();
-    if (b64) {
-      cacheSetRaw(key, b64);
-      await claudeSetRaw(key, b64);
+    const s3Data = await s3Get();
+    if (s3Data) {
+      try { if (typeof localStorage !== "undefined") localStorage.setItem(key, JSON.stringify(s3Data)); } catch {}
+      return s3Data;
     }
-    return b64 || null;
   } catch (err) {
-    console.warn("[S3] File GET error:", err.message);
-    return null;
+    console.warn("[Storage] S3 GET failed, falling back:", err.message);
   }
-}
-
-export async function deleteFileBlob(id) {
-  if (!id) return;
-  const key = fileStorageKey(id);
-  cacheRemove(key);
-  await claudeDelete(key);
   try {
-    await fetch(s3FileUrl(id), { method: "DELETE" });
+    if (typeof localStorage !== "undefined") {
+      const v = localStorage.getItem(key);
+      if (v) return JSON.parse(v);
+    }
   } catch {}
+  if (hasClaudeStorage) {
+    try { const r = await window.storage.get(key); return r ? JSON.parse(r.value) : null; } catch { return null; }
+  }
+  return _memStore[key] ? JSON.parse(_memStore[key]) : null;
 }
 
-export async function clearSavedFileBlobs(ids) {
-  const list = Array.isArray(ids) ? ids : [];
-  await Promise.all(list.map((id) => deleteFileBlob(id)));
-}
-
-export function clearLocalCache() {
-  cacheRemove(STORAGE_KEY);
+async function storageSet(key, value) {
+  try { if (typeof localStorage !== "undefined") localStorage.setItem(key, JSON.stringify(value)); } catch {}
+  s3PutDebounced(value);
+  if (hasClaudeStorage) { try { await window.storage.set(key, JSON.stringify(value)); } catch {} }
+  _memStore[key] = JSON.stringify(value);
 }
 
 // ============================================================
-// Auto sync
+// HIGH-LEVEL CRUD — UI gọi trực tiếp các method này
 // ============================================================
 
+const STORAGE_KEY = "crm_data_v12";
+
+/**
+ * Load toàn bộ data từ storage (S3 → localStorage → memory)
+ * @returns {Object|null}
+ */
+export async function loadAll() {
+  return storageGet(STORAGE_KEY);
+}
+
+/**
+ * Save toàn bộ data object (dùng cho setState + persist)
+ * @param {Object} data - full CRM state
+ */
+export async function saveAll(data) {
+  await storageSet(STORAGE_KEY, data);
+}
+
+/**
+ * Thêm 1 item vào collection
+ * @param {Object} data - current full state
+ * @param {string} key - collection name (e.g. "products", "pos")
+ * @param {Object} item - item mới
+ * @param {Object} auditLog - mảng audit log mới (đã append entry)
+ * @returns {Object} new full state (đã save)
+ */
+export async function addItem(data, key, item, auditLog) {
+  const next = {
+    ...data,
+    [key]: [...data[key], item],
+    auditLog: auditLog || data.auditLog,
+  };
+  await saveAll(next);
+  return next;
+}
+
+/**
+ * Sửa 1 item trong collection (merge updates)
+ * @param {Object} data - current full state
+ * @param {string} key - collection name
+ * @param {string} id - item id
+ * @param {Object} updates - fields to merge
+ * @param {Object} auditLog - mảng audit log mới
+ * @returns {Object} new full state (đã save)
+ */
+export async function editItem(data, key, id, updates, auditLog) {
+  const next = {
+    ...data,
+    [key]: data[key].map(x => x.id === id ? { ...x, ...updates } : x),
+    auditLog: auditLog || data.auditLog,
+  };
+  await saveAll(next);
+  return next;
+}
+
+/**
+ * Soft delete — đánh dấu deleted: true, không xóa khỏi array
+ * @param {Object} data - current full state
+ * @param {string} key - collection name
+ * @param {string} id - item id
+ * @param {string} deletedBy - user id hoặc username
+ * @param {Object} auditLog - mảng audit log mới
+ * @returns {Object} new full state (đã save)
+ */
+export async function softDeleteItem(data, key, id, deletedBy, auditLog) {
+  const now = new Date().toISOString();
+  const next = {
+    ...data,
+    [key]: data[key].map(x => x.id === id
+      ? { ...x, deleted: true, deletedAt: now, deletedBy: deletedBy || "unknown" }
+      : x
+    ),
+    auditLog: auditLog || data.auditLog,
+  };
+  await saveAll(next);
+  return next;
+}
+
+/**
+ * Save settings
+ * @param {Object} data - current full state
+ * @param {Object} newSettings - settings object mới
+ * @param {Object} auditLog - mảng audit log mới
+ * @returns {Object} new full state (đã save)
+ */
+export async function saveSettings(data, newSettings, auditLog) {
+  const next = {
+    ...data,
+    settings: newSettings,
+    auditLog: auditLog || data.auditLog,
+  };
+  await saveAll(next);
+  return next;
+}
+
+/**
+ * Update markets (dùng khi tạo warehouse mới)
+ * @param {Object} data - current full state
+ * @param {Array} updatedMarkets - mảng markets đã update
+ * @param {Object} auditLog - mảng audit log mới
+ * @returns {Object} new full state (đã save)
+ */
+export async function saveMarkets(data, updatedMarkets, auditLog) {
+  const next = {
+    ...data,
+    markets: updatedMarkets,
+    auditLog: auditLog || data.auditLog,
+  };
+  await saveAll(next);
+  return next;
+}
+
+/**
+ * Filter helper — loại bỏ soft-deleted items
+ * @param {Array} arr
+ * @returns {Array} items chưa bị xóa
+ */
+export function alive(arr) {
+  return (arr || []).filter(x => !x.deleted);
+}
+
+// ============================================================
+// AUTO SYNC — Push + Pull mỗi 2 phút
+// Pull: GET từ S3, nếu data mới hơn → cập nhật UI
+// Push: Nếu local có thay đổi chưa sync → PUT lên S3
+// ============================================================
+
+const AUTO_SYNC_INTERVAL = 2 * 60 * 1000; // 2 phút
+let _syncTimer = null;
+let _lastSyncedJSON = null; // JSON string của lần sync gần nhất, dùng để detect thay đổi
+
+/**
+ * Bắt đầu auto sync
+ * @param {Function} getDataFn - () => data hiện tại
+ * @param {Function} setDataFn - (newData) => cập nhật state UI
+ */
 export function startAutoSync(getDataFn, setDataFn) {
   stopAutoSync();
   _syncTimer = setInterval(async () => {
     try {
       const localData = getDataFn();
-      if (!isBckdState(localData)) return;
+      if (!localData) return;
 
+      // 1. Pull: GET từ S3
       const remoteData = await s3Get();
-      if (isBckdState(remoteData)) {
+
+      if (remoteData) {
         const localJSON = JSON.stringify(localData);
         const remoteJSON = JSON.stringify(remoteData);
 
-        if (remoteJSON !== localJSON) {
-          const remoteTime = newestTimestamp(remoteData);
-          const localTime = newestTimestamp(localData);
-          if (remoteTime > localTime) {
-            console.log("[AutoSync] Pull newer GC BCKD state from S3");
-            cacheSetRaw(STORAGE_KEY, remoteJSON);
-            await claudeSetRaw(STORAGE_KEY, remoteJSON);
-            _lastSyncedJSON = remoteJSON;
+        // Nếu remote khác local → ai mới hơn?
+        if (localJSON !== remoteJSON) {
+          // So sánh bằng auditLog length — nhiều hơn = mới hơn
+          const localLogLen = (localData.auditLog || []).length;
+          const remoteLogLen = (remoteData.auditLog || []).length;
+
+          if (remoteLogLen > localLogLen) {
+            // Remote mới hơn → pull về UI
+            console.log(`[AutoSync] Pull — remote has ${remoteLogLen} logs vs local ${localLogLen}`);
             setDataFn(remoteData);
+            _lastSyncedJSON = remoteJSON;
+            // Cache vào localStorage
+            try { if (typeof localStorage !== "undefined") localStorage.setItem(STORAGE_KEY, remoteJSON); } catch {}
             return;
           }
         }
       }
 
+      // 2. Push: Nếu local thay đổi so với lần sync trước → đẩy lên S3
       const currentJSON = JSON.stringify(localData);
       if (_lastSyncedJSON !== currentJSON) {
-        console.log("[AutoSync] Push GC BCKD state to S3");
-        await s3Put(localData);
+        console.log("[AutoSync] Push — local data changed, syncing to S3...");
+        const ok = await s3Put(localData);
+        if (ok) _lastSyncedJSON = currentJSON;
+      } else {
+        console.log("[AutoSync] No changes detected, skipping");
       }
     } catch (err) {
       console.warn("[AutoSync] Error:", err.message);
     }
   }, AUTO_SYNC_INTERVAL);
-  console.log(`[AutoSync] Started - every ${AUTO_SYNC_INTERVAL / 1000}s`);
+  console.log(`[AutoSync] Started Push+Pull — every ${AUTO_SYNC_INTERVAL / 1000}s`);
 }
 
+/**
+ * Dừng auto sync
+ */
 export function stopAutoSync() {
   if (_syncTimer) {
     clearInterval(_syncTimer);
     _syncTimer = null;
     console.log("[AutoSync] Stopped");
   }
-}
-
-export function alive(arr) {
-  return (arr || []).filter((x) => !x.deleted);
 }
