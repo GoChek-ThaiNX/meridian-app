@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react";
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, RadialBarChart, RadialBar } from "recharts";
 import * as XLSX from "xlsx";  // v23b: Đọc file xlsx import từ user
-import { loadAll, saveAll, addItem, editItem, softDeleteItem, saveSettings as saveSettingsToS3, saveMarkets, alive, s3Flush, startAutoSync, stopAutoSync } from "./s3Storage.js";
+import { loadAll, saveAll, addItem, editItem, softDeleteItem, saveSettings as saveSettingsToS3, saveMarkets, alive, s3Flush, startAutoSync, stopAutoSync } from "./indexedDbS3Storage.js";
 
 // ============================================================
 // GoChek Factory CRM — Phiên bản V38t
@@ -1425,10 +1425,10 @@ const HELP_CONTENT = {
           { type: "h", text: "Q: Đăng nhập sai nhiều lần có bị khóa không?" },
           { type: "p", text: "Hiện tại KHÔNG có chế độ tự khóa. Nếu cần thiết, admin có thể tạm chuyển user sang isActive=false." },
           { type: "h", text: "Q: Dữ liệu có tự backup không?" },
-          { type: "p", text: "Dữ liệu lưu trong localStorage trình duyệt. Mỗi máy 1 kho dữ liệu riêng. Để backup → tab Cấu hình → Export toàn bộ data ra file JSON. Khuyến nghị backup hàng tuần." },
-          { type: "warn", text: "Xóa lịch sử trình duyệt / cài lại Chrome có thể mất data. Backup định kỳ là điều bắt buộc." },
+          { type: "p", text: "Dữ liệu chính được đồng bộ trên S3 và lưu cache offline trong IndexedDB của trình duyệt. Để backup thủ công → tab Cấu hình → Export toàn bộ data ra file JSON." },
+          { type: "warn", text: "Khi mất mạng, app dùng cache IndexedDB gần nhất. Không xóa dữ liệu trang nếu cần tiếp tục làm việc offline." },
           { type: "h", text: "Q: 1 user có thể đăng nhập nhiều máy không?" },
-          { type: "p", text: "Có. Nhưng dữ liệu KHÔNG đồng bộ giữa các máy — mỗi máy có data riêng. Để dùng chung, cần import/export thủ công hoặc đầu tư backend (xem mục Tương lai)." },
+          { type: "p", text: "Có. Mỗi máy tải dữ liệu chung từ S3 khi mở web và duy trì một cache IndexedDB riêng để làm việc khi mất mạng." },
         ],
       },
       {
@@ -1743,8 +1743,8 @@ const HELP_CONTENT = {
             "Sau đổi tự logout — phải login lại với mật khẩu mới",
             "Nếu quên mật khẩu cũ → liên hệ Admin để reset",
           ]},
-          { type: "h", text: "Giới hạn (do app local)" },
-          { type: "p", text: "App lưu data ở localStorage trên máy mỗi user. Mật khẩu được lưu plain text trong storage — tránh dùng mật khẩu trùng với Gmail/Facebook. Nếu cần bảo mật cao hơn, cần backend (project lớn, ngoài V38g)." },
+          { type: "h", text: "Lưu trữ và bảo mật" },
+          { type: "p", text: "Dữ liệu nghiệp vụ được lưu trên S3 và cache trong IndexedDB của từng trình duyệt. Session đăng nhập vẫn được lưu riêng trong localStorage trong 24 giờ." },
         ],
       },
       {
@@ -2224,7 +2224,7 @@ const DEFAULT_SETTINGS = {
 // ============================================================
 // STORAGE & UTILS
 // ============================================================
-// v51: Storage layer đã chuyển sang s3Storage.js (S3 + localStorage cache + fallback)
+// v51: Storage layer uses S3 + IndexedDB cache + memory fallback.
 
 const fmt = (n, currency = "CNY") => {
   if (n === undefined || n === null || isNaN(n)) return "-";
@@ -19293,31 +19293,22 @@ export default function App() {
     marketTransfers: [],
   });
   const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState("");
   // v38g: State cho modal đổi mật khẩu cá nhân
   const [showChangePass, setShowChangePass] = useState(false);
   // v38i: State + handler banner migration đã được xóa theo yêu cầu (không cần thiết nữa)
 
   useEffect(() => {
     (async () => {
+      try {
       // v23: Ưu tiên load v31, nếu chưa có thì migrate từ v23/v22/.../v9
       // v31 refactor: Thay 14 cấp if-else lồng nhau bằng loop. Logic giống hệt — ưu tiên v cao trước.
       // v32: Bump key v23 → v31 để khi user dùng V32 lần đầu sẽ KHÔNG load data test cũ trong storage.
       //      Thay vào đó: thử migrate từ v23 (nếu user đã dùng app trước & có data thật), không có thì init từ SEED.
       // v34: Bump key v31 → v34 để force chạy migration backfill exchangeRate cho payment cũ
       // v38: Bump key v34 → v38 để force chạy migration backfill paymentStage + stageHistory cho payment cũ
-      // v51: Load từ s3Storage.js (S3 + localStorage cache + fallback)
+      // v51: Always fetch S3, persist to IndexedDB, then read IndexedDB into React state.
       let saved = await loadAll();
-      let migratedFrom = ""; // ghi nhận đã migrate từ phiên bản nào (debug/audit)
-      if (!saved) {
-        const LEGACY_VERSIONS = ["v38i", "v38", "v34", "v31", "v23", "v22", "v21", "v20", "v19", "v18", "v17", "v16", "v15", "v14", "v13", "v12", "v11", "v10", "v9"];
-        for (const v of LEGACY_VERSIONS) {
-          try {
-            const raw = localStorage.getItem(`crm_data_${v}`);
-            if (raw) { saved = JSON.parse(raw); migratedFrom = v; break; }
-          } catch {}
-        }
-        if (migratedFrom) console.info(`[GoChek CRM] Migrating data from ${migratedFrom} → v51 schema`);
-      }
 
       if (saved) {
         // v13: Migration PO status — map các status cũ sang 3 status mới (Chờ duyệt / Đã duyệt / Hủy).
@@ -19598,7 +19589,7 @@ export default function App() {
         }
 
         setData(d => ({ ...d, ...saved }));
-        // v51: Save qua s3Storage.js
+        // Persist schema migrations to IndexedDB and schedule the S3 PUT.
         await saveAll(saved);
       } else {
         // v32: Khởi tạo lần đầu — chỉ có 1 admin + 4 thị trường + 6 kho + settings.
@@ -19668,6 +19659,10 @@ export default function App() {
       }
 
       setLoaded(true);
+      } catch (error) {
+        console.error("[Startup] Unable to initialize CRM storage:", error);
+        setLoadError(error instanceof Error ? error.message : String(error));
+      }
     })();
   }, []);
 
@@ -19686,7 +19681,7 @@ export default function App() {
   }, [loaded]);
 
   // v23: save tự động rebuild AUTO movements khi data shipments/warranties thay đổi
-  // v51: Save qua s3Storage.js với debounce + auto-sync
+  // v51: Save to IndexedDB immediately and debounce the S3 PUT.
   const save = useCallback(async (next) => {
     const synced = {
       ...next,
@@ -20475,7 +20470,17 @@ export default function App() {
     marketTransfers: alive(data.marketTransfers),
   }), [data]);
 
-  if (!loaded) return <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: C.bg, color: C.textMuted }}>Đang tải...</div>;
+  if (loadError) return <>
+    <style>{css}</style>
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, background: C.bg }}>
+      <div style={{ width: "100%", maxWidth: 520, padding: 24, border: `1px solid ${C.red200 || "#fecaca"}`, borderRadius: 8, background: "white" }}>
+        <h2 style={{ margin: "0 0 10px", color: C.text, fontSize: 20 }}>Không thể tải dữ liệu</h2>
+        <p style={{ margin: "0 0 18px", color: C.textMuted, lineHeight: 1.6 }}>{loadError}</p>
+        <button onClick={() => window.location.reload()} style={{ padding: "10px 16px", border: "none", borderRadius: 6, background: C.green600, color: "white", fontWeight: 700, cursor: "pointer" }}>Thử lại</button>
+      </div>
+    </div>
+  </>;
+  if (!loaded) return <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: C.bg, color: C.textMuted }}>Đang tải dữ liệu từ S3...</div>;
   if (!user) return <><style>{css}</style><LoginScreen onLogin={handleLogin} users={activeData.users} /></>;
 
   const currentTab = TABS.find(t => t.id === tab);

@@ -177,3 +177,74 @@ import App from './GoChek_CRM_V45.jsx'
 - [ ] `main.jsx` import đúng version mới nhất
 - [ ] Build pass (`npx vite build`)
 - [ ] Không có diagnostics error
+
+## 11. Bổ sung guard an toàn: KHÔNG PUT data rỗng / mất record lên S3
+
+Tất cả đường ghi S3 phải đi qua `s3Put()` trong `s3Storage.js`. Không được ghi trực tiếp bằng `fetch(S3_URL, { method: "PUT" })`, `navigator.sendBeacon(S3_URL, ...)`, hoặc helper khác bỏ qua validation.
+
+`s3Put()` bắt buộc validate trước khi PUT:
+
+```javascript
+const REQUIRED_KEYS = ["factories", "products", "pos", "shipments", "payments", "users", "settings"];
+
+const PROTECTED_COLLECTION_KEYS = [
+  "factories",
+  "products",
+  "pos",
+  "shipments",
+  "payments",
+  "users",
+  "markets",
+  "carriers",
+  "openingBalances",
+  "feePayments",
+  "warranties",
+  "openingStock",
+  "stockImportBatches",
+  "stockOnHand",
+  "marketTransfers",
+];
+```
+
+Quy tắc validation bắt buộc:
+
+- Không PUT nếu `data` null, không phải object, hoặc thiếu key bắt buộc.
+- Không PUT nếu các collection chính không phải array.
+- Không PUT nếu tổng dữ liệu nghiệp vụ rỗng.
+- Trước khi PUT, GET bản hiện tại trên S3 để so sánh.
+- Không PUT nếu collection protected bị giảm số lượng so với bản S3 hiện tại.
+- Không PUT nếu record cũ biến mất khỏi collection. Muốn xóa phải giữ record và gắn marker.
+- Delete thường phải gắn `deleted: true`, `deletedAt`, `deletedBy`.
+- Hard delete UI cũng không được remove vật lý khỏi JSON; nếu cần phân biệt thì gắn thêm `hardDeleted: true`, `hardDeletedAt`, `hardDeletedBy`.
+- UI/calculation phải dùng `alive(...)` hoặc `activeData` để ẩn record đã marker, nhưng file S3 vẫn giữ record.
+- `s3Flush()` cũng phải gọi `s3Put(data)`, không dùng `sendBeacon` trực tiếp vì sẽ bỏ qua validation.
+
+Ví dụ delete đúng:
+
+```javascript
+const now = new Date().toISOString();
+const deletedBy = user?.id || user?.username || "unknown";
+
+save({
+  ...data,
+  [key]: (data[key] || []).map(x => x.id === id
+    ? { ...x, deleted: true, deletedAt: now, deletedBy }
+    : x
+  ),
+  auditLog: newLog,
+});
+```
+
+Ví dụ delete SAI, không được dùng:
+
+```javascript
+save({ ...data, [key]: data[key].filter(x => x.id !== id), auditLog: newLog });
+```
+
+Checklist bổ sung:
+
+- [ ] `s3Put()` chặn data rỗng, thiếu key bắt buộc, collection không phải array
+- [ ] `s3Put()` so sánh bản S3 hiện tại và block nếu collection bị giảm hoặc record cũ biến mất
+- [ ] Không có đường PUT/flush nào bypass validation của `s3Put()`
+- [ ] Delete thường/hard delete dùng marker `deleted:true` thay vì `.filter(...)` remove record
+- [ ] UI/calculation dùng `alive(...)` hoặc `activeData` để ẩn record đã marker
