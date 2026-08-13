@@ -48,6 +48,8 @@ const PROTECTED_COLLECTION_KEYS = [
   "stockImportBatches",
   "stockOnHand",
   "marketTransfers",
+  "debtAdjustments",
+  "marketDebtTransfers",
 ];
 
 function itemIdentity(item) {
