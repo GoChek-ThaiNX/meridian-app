@@ -17,18 +17,26 @@ const DEBOUNCE_MS = 1500;
 // LOW-LEVEL: S3 GET / PUT
 // ============================================================
 
-export async function s3Get() {
+// v53: Đọc NGHIÊM NGẶT — phân biệt "lỗi đọc" (ok:false) với "chưa có dữ liệu" (ok:true, value:null).
+// s3Get() trả null cho cả 2 trường hợp → nếu dùng để quyết định ghi thì có thể ghi đè xoá sạch kho.
+export async function s3GetStrict() {
   try {
     const res = await fetch(S3_URL, { method: "GET", cache: "no-store" });
-    if (!res.ok) {
-      if (res.status === 404 || res.status === 403) return null;
-      throw new Error(`S3 GET failed: ${res.status}`);
-    }
-    return await res.json();
+    if (res.status === 404 || res.status === 403) return { ok: true, value: null };
+    if (!res.ok) return { ok: false, error: new Error(`S3 GET failed: ${res.status}`) };
+    return { ok: true, value: await res.json() };
   } catch (err) {
-    console.warn("[S3] GET error:", err.message);
+    return { ok: false, error: err };
+  }
+}
+
+export async function s3Get() {
+  const res = await s3GetStrict();
+  if (!res.ok) {
+    console.warn("[S3] GET error:", res.error?.message || res.error);
     return null;
   }
+  return res.value;
 }
 
 const REQUIRED_KEYS = ["factories", "products", "pos", "shipments", "payments", "users", "settings"];
@@ -50,6 +58,8 @@ const PROTECTED_COLLECTION_KEYS = [
   "marketTransfers",
   "debtAdjustments",
   "marketDebtTransfers",
+  // v53: Nhật ký là bằng chứng truy vết — không được ghi bản cũ làm mất bớt dòng log
+  "auditLog",
 ];
 
 function itemIdentity(item) {
@@ -115,23 +125,32 @@ async function validateBeforeSave(data) {
   return validateAgainstPreviousSave(data, remoteData);
 }
 
-export async function s3Put(data) {
+// v53: Ghi NGHIÊM NGẶT — lỗi/bị chặn thì NÉM LỖI kèm lý do để lớp trên báo "chưa lưu" + thử lại.
+// Mọi đường ghi S3 (kể cả s3Put/s3Flush) đều đi qua đây → không có đường nào bỏ qua validation.
+export async function s3PutStrict(data) {
   const check = await validateBeforeSave(data);
   if (!check.ok) {
-    console.error("[S3] BLOCKED save:", check.reason);
-    return false;
+    const err = new Error(`Kho từ chối ghi: ${check.reason}`);
+    err.blocked = true;
+    throw err;
   }
+  const res = await fetch(S3_URL, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`S3 PUT failed: ${res.status} ${res.statusText}`);
+  return true;
+}
+
+export async function s3Put(data) {
   try {
-    const res = await fetch(S3_URL, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok) throw new Error(`S3 PUT failed: ${res.status} ${res.statusText}`);
+    await s3PutStrict(data);
     console.log("[S3] Saved successfully");
     return true;
   } catch (err) {
-    console.error("[S3] PUT error:", err.message);
+    if (err.blocked) console.error("[S3] BLOCKED save:", err.message);
+    else console.error("[S3] PUT error:", err.message);
     return false;
   }
 }

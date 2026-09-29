@@ -1,6 +1,8 @@
 import {
   s3Get,
+  s3GetStrict,
   s3Put,
+  s3PutStrict,
   s3PutDebounced,
   s3Flush as flushS3,
 } from "./s3Storage.js";
@@ -241,6 +243,69 @@ export async function saveAll(data) {
   }
 }
 
+// ============================================================
+// v53: ĐỌC / GHI NGHIÊM NGẶT — dùng cho lớp đồng bộ nhiều máy (outbox + gộp thay đổi)
+// ============================================================
+// Khác loadAll()/saveAll():
+//   - loadAllStrict() phân biệt "lỗi đọc kho" với "kho chưa có dữ liệu" → lớp trên KHÔNG tự khởi tạo
+//     dữ liệu mới khi chỉ là mất mạng (V40 từng ghi đè xoá sạch dữ liệu chung vì lỗi này).
+//   - saveAllStrict() NÉM LỖI khi kho từ chối/ghi lỗi → thay đổi được giữ trong hộp chờ để gửi lại,
+//     không âm thầm chỉ lưu trên máy.
+// Cả hai vẫn đi qua s3GetStrict/s3PutStrict → giữ nguyên toàn bộ validation chống mất dữ liệu.
+
+/**
+ * @param {{ allowCache?: boolean }} options allowCache=true: cho phép lấy cache IndexedDB / localStorage cũ
+ *   khi S3 không đọc được hoặc chưa có file (chỉ dùng lúc mở app, KHÔNG dùng cho đường ghi).
+ * @returns {Promise<{ ok: boolean, value?: Object|null, fromCache?: boolean, error?: Error }>}
+ */
+export async function loadAllStrict({ allowCache = false } = {}) {
+  const result = await s3GetStrict();
+
+  if (result.ok && result.value) {
+    try {
+      const persistedData = await persistAndReadBack(result.value, "S3 load");
+      _lastSyncedJSON = JSON.stringify(persistedData);
+      return { ok: true, value: persistedData };
+    } catch (error) {
+      // Cache lỗi (hoặc dữ liệu kho chưa đủ schema) → vẫn dùng bản vừa đọc từ kho
+      console.warn("[Storage] IndexedDB cache commit skipped:", formatError(error));
+      return { ok: true, value: result.value };
+    }
+  }
+
+  if (allowCache) {
+    const cachedData = await readIndexedDbFallback();
+    if (cachedData) return { ok: true, value: cachedData, fromCache: true };
+
+    const migratedData = await migrateLegacyLocalStorage();
+    if (migratedData) return { ok: true, value: migratedData, fromCache: true };
+
+    const memoryData = _memStore.get(STORAGE_KEY);
+    if (memoryData) return { ok: true, value: memoryData, fromCache: true };
+  }
+
+  if (!result.ok) return { ok: false, error: result.error };
+  return { ok: true, value: null };
+}
+
+/**
+ * Ghi cả khối lên S3 rồi mới cập nhật cache. Ném lỗi nếu kho từ chối hoặc ghi lỗi.
+ */
+export async function saveAllStrict(data) {
+  assertValidData(data, "Save");
+  await s3PutStrict(data);
+
+  _memStore.set(STORAGE_KEY, data);
+  _lastSyncedJSON = JSON.stringify(data);
+
+  try {
+    await indexedDbSet(STORAGE_KEY, data);
+  } catch (error) {
+    console.error("[IndexedDB] Cache write failed after a successful S3 save:", formatError(error));
+  }
+  return true;
+}
+
 export async function addItem(data, key, item, auditLog) {
   const next = {
     ...data,
@@ -359,4 +424,4 @@ export function stopAutoSync() {
   console.info("[AutoSync] Stopped");
 }
 
-export { s3Get, s3Put, s3PutDebounced };
+export { s3Get, s3GetStrict, s3Put, s3PutStrict, s3PutDebounced };
