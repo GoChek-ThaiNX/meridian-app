@@ -58,6 +58,11 @@ const PROTECTED_COLLECTION_KEYS = [
   "marketTransfers",
   "debtAdjustments",
   "marketDebtTransfers",
+  // V41-7: tài khoản ngân hàng công ty + phiếu hoàn tiền ĐVVC — số liệu tiền, không được mất bản ghi
+  "bankAccounts",
+  "carrierRefunds",
+  // V41-8: phiếu kiểm tra chất lượng (QC) theo đơn giao hàng — bằng chứng nghiệm thu, phải giữ nguyên
+  "qcReports",
   // v53: Nhật ký là bằng chứng truy vết — không được ghi bản cũ làm mất bớt dòng log
   "auditLog",
 ];

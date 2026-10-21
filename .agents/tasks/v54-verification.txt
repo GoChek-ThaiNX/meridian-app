@@ -1,0 +1,194 @@
+GHI CHU XAC MINH — AP RULE s3-migration-rule.md CHO src\GoChek_CRM_V54.jsx
+Vong: 1 (chua co .agents\tasks\v54-s3-review.json tai thoi diem bat dau)
+Workspace: d:\Project\GoChek\Meridian-app   Shell: PowerShell (Windows)
+Thoi diem: sau khi hoan tat toan bo cac diem sua muc 0-9
+
+============================================================
+1. KIEM TRA FILE REVIEW (truoc khi lam)
+============================================================
+Lenh:
+  Test-Path 'd:\Project\GoChek\Meridian-app\.agents\tasks\v54-s3-review.json'
+Ket qua:
+  False
+=> Vong dau. Thuc hien toan bo nhiem vu tu dau.
+
+Tao thu muc ghi chu:
+  New-Item -ItemType Directory -Force -Path 'd:\Project\GoChek\Meridian-app\.agents\tasks'
+Ket qua: OK (thu muc da ton tai/da tao)
+
+============================================================
+2. BUILD — npx vite build
+============================================================
+Lenh (cwd = d:\Project\GoChek\Meridian-app):
+  npx vite build 2>&1 | Tee-Object -Variable buildOut; Write-Output "EXITCODE=$LASTEXITCODE"
+
+Ket qua: PASS
+
+Output nguyen van (phan chinh):
+  vite v5.4.21 building for production...
+  transforming...
+  Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+    npx update-browserslist-db@latest
+  (v) 833 modules transformed.
+  rendering chunks...
+  computing gzip size...
+  dist/index.html                     0.59 kB | gzip:   0.40 kB
+  dist/assets/index-DjYR2owF.css     23.45 kB | gzip:   4.98 kB
+  dist/assets/index-4_bLQMDi.js   1,803.27 kB | gzip: 527.22 kB
+  (!) Some chunks are larger than 500 kB after minification. Consider: ...
+  (v) built in 17.55s
+  EXITCODE=0
+
+Dong tong ket: "built in 17.55s", EXITCODE=0, khong co error.
+Ghi chu: 2 canh bao con lai (caniuse-lite cu 6 thang; chunk > 500 kB) la canh bao
+co san cua du an, khong lien quan den thay doi nay — V53 build ra cung 2 canh bao do.
+
+============================================================
+3. CHECKLIST GREP — src\GoChek_CRM_V54.jsx
+============================================================
+Lenh (cwd = d:\Project\GoChek\Meridian-app), dang chung:
+  Select-String -Path 'src\GoChek_CRM_V54.jsx' -Pattern '<PATTERN>' -AllMatches | Measure-Object
+
+Pattern                                                                               | So ket qua | Ky vong | Dat
+--------------------------------------------------------------------------------------+------------+---------+----
+storage\.get\(                                                                        | 0          | 0       | OK
+storage\.set\(                                                                        | 0          | 0       | OK
+storageReadStrict|storageWriteStrict|storageReadWithRetry|DATA_KEY|META_KEY|
+hasClaudeStorage|_memStore                                                            | 0          | 0       | OK
+_v38i_migrated.*false                                                                 | 0          | 0       | OK
+\.filter\(x => x\.id !== id\)                                                         | 0          | 0       | OK
+s3Flush                                                                               | 4          | > 0     | OK
+startAutoSync                                                                         | 3          | > 0     | OK
+beforeunload                                                                          | 5          | > 0     | OK
+deleteMarker                                                                          | 6          | > 0     | OK
+applyRemoteData                                                                       | 7          | > 0     | OK
+readDataStrict|readMetaStrict|writeDataStrict|readDataWithRetry                       | 16         | > 0     | OK
+
+Chi tiet cac dong khop quan trong (so dong sau khi sua):
+  - dong 5    : import { loadAllStrict, saveAllStrict, alive, s3Flush, startAutoSync, stopAutoSync } from "./indexedDbS3Storage.js";
+  - dong 23736: startAutoSync( () => fullDataRef.current, (newData) => { ... applyRemoteData(newData); } )
+  - dong 23745: const handleBeforeUnload = () => { if (fullDataRef.current) s3Flush(fullDataRef.current); };
+  - dong 23746: window.addEventListener("beforeunload", handleBeforeUnload);
+  - dong 23748: stopAutoSync();  (cleanup cua effect auto-sync)
+  - dong 24642: handleLogout -> await drainOutbox(); roi if (fullDataRef.current) s3Flush(fullDataRef.current);
+  - onDelete  : [key]: data[key].map(x => x.id === id ? { ...x, ...deleteMarker(user) } : x)
+  - onHardDelete: [key]: (data[key] || []).map(x => x.id === id ? { ...x, ...deleteMarker(user, true) } : x)
+
+============================================================
+4. CHECKLIST GREP — TOAN BO src\*.js + src\*.jsx
+============================================================
+Lenh:
+  Select-String -Path 'src\*.js','src\*.jsx' -Pattern 'method: "PUT"'
+Ket qua: 1 ket qua
+  s3Storage.js:143   (nam trong s3PutStrict — duong ghi DUY NHAT, co validateBeforeSave truoc khi PUT)
+=> Dat: chi con DUY NHAT 1 cho method: "PUT".
+
+Lenh:
+  Select-String -Path 'src\*.js','src\*.jsx' -Pattern 'sendBeacon'
+Ket qua: 0 ket qua
+=> Dat: khong co duong ghi nao bypass validation qua sendBeacon.
+
+Lenh:
+  Select-String -Path 'src\main.jsx' -Pattern 'import App from'
+Ket qua:
+  src\main.jsx:3:import App from './GoChek_CRM_V54.jsx'
+=> Dat: main.jsx da tro sang V54.
+
+============================================================
+5. SO KHOP VOI BAN THAM CHIEU V53 (Compare-Object)
+============================================================
+Muc dich: chung minh V54 va V53 DONG NHAT ve lop persistence.
+Cach lam: lay cung doan code o 2 file, chuan hoa chuoi phien ban
+(v53 -> vXX / v54 -> vXX, V41-7 -> V41-X / V41-8 -> V41-X) roi Compare-Object.
+
+(a) Khoi "STORAGE & UTILS" + dong bo nhieu may + outbox helpers
+    V53 dong ~2569-2946  vs  V54 dong ~2644-3022
+    Ket qua Compare-Object: KHONG co chenh lech noi dung
+    (chi lech 2-3 dong o bien doan cat, khong phai lech code).
+
+(b) App component: tu `const userRef = useRef(null);` den effect
+    "v41-2: Mo app -> tu gui cac muc cho"
+    Ket qua Compare-Object: chi lech dung cac bo sung THAT cua V41-8:
+      + qcReports: [] trong state khoi tao va buildInitData
+      + if (!Array.isArray(saved.qcReports)) saved.qcReports = [];
+      + block migration _v418_perm_migrated (quyen view_sensitive / order_viewer)
+    Khong co lech nao thuoc lop persistence.
+
+(c) onDelete + onHardDelete (den truoc "V41-4: DOI MA PO")
+    Ket qua Compare-Object: KHONG co chenh lech.
+
+(d) handleLogout (den truoc "Helper rolling session")
+    Ket qua Compare-Object: KHONG co chenh lech.
+
+(e) Effect "TU DONG BO S3" (den truoc "v41-2: Mo app -> tu gui")
+    Ket qua Compare-Object: KHONG co chenh lech.
+
+(f) Khoi "HANG DOI GUI + HOP CHO TREN MAY" (drainOutbox / drainOutboxOnce /
+    enqueueSync / reloadFromRemote / save / vong poll 30s) den truoc "TU DONG BO S3"
+    Ket qua Compare-Object: KHONG co chenh lech.
+
+(g) healRenamedRefs
+    Ket qua Compare-Object: chi lech nhanh qcReports cua V41-8 (giu nguyen theo
+    yeu cau). Phan dung alive(d.pos)/alive(d.shipments) da giong V53.
+
+============================================================
+6. FILE TAM
+============================================================
+Khong tao file tam nao trong qua trinh lam. Thu muc dist/ la ket qua build
+binh thuong cua `npx vite build` (da co san tu truoc, khong phai file tam).
+
+============================================================
+7. TOM TAT CAC DIEM DA SUA
+============================================================
+Muc 0 — src\s3Storage.js: them "bankAccounts", "carrierRefunds", "qcReports" vao
+        PROTECTED_COLLECTION_KEYS (kem comment tieng Viet). Giu nguyen cac key cu
+        ke ca "auditLog".
+Muc 1 — V54 dong 4-5: them comment v54 + import loadAllStrict/saveAllStrict/alive/
+        s3Flush/startAutoSync/stopAutoSync tu ./indexedDbS3Storage.js.
+Muc 2 — Xoa _memStore / hasClaudeStorage / const storage = {...}, thay bang khoi
+        comment giai thich (copy tu V53, doi v53 -> v54).
+Muc 3 — Xoa DATA_KEY / META_KEY; cap nhat comment khoi "v41: DONG BO NHIEU MAY"
+        (bo cau "KHONG doi key luu tru", them 3 dong giai thich v54);
+        thay storageReadStrict/storageWriteStrict/storageReadWithRetry bang
+        readDataStrict / readMetaStrict / writeDataStrict / readDataWithRetry;
+        them deleteMarker(actor, hard) + aliveData(data).
+        Cap nhat moi call site: readDataWithRetry(3); readDataStrict() trong
+        syncWriteOps (2 cho), reloadFromRemote; readMetaStrict() trong vong poll
+        (da xoa nhanh fallback doc DATA_KEY); writeDataStrict(x) 4 cho; xoa cho
+        ghi META_KEY (thay bang comment); 2 cho storage.get: vong LEGACY_VERSIONS
+        doc localStorage.getItem trong try/catch + them "v38i" dau mang, va session
+        restore dung saved || fullDataRef.current || readDataStrict({allowCache:true})
+        kem alive(...) quanh danh sach users.
+Muc 4 — computeLocalDiff(base, next, actor): xoa = push vao changed voi
+        set: deleteMarker(actor); applyDiffToRemote(remote, ops, actor): op.removed
+        gan marker thay vi filter, op.added ghi de khi id dang bi ban ghi da xoa
+        chiem; syncOpsPresent kiem tra ban ghi con trong file nhung da co marker;
+        syncWriteOps dung rebuildAutoMovements(alive(...), alive(...), ...);
+        healRenamedRefs build poMap/shMap/poIds/shIds tu alive(d.pos)/alive(d.shipments)
+        (giu nguyen nhanh qcReports cua V41-8); describeOutboxItem tach dels/edits;
+        syncWrite va enqueueSync truyen actor (enqueueSync lay actor TRUOC khi goi
+        computeLocalDiff).
+Muc 5 — Them fullDataRef, drainPromiseRef, applyRemoteData(full, {merge}); dua du
+        lieu vao state qua applyRemoteData o forceInitFromErrorScreen ({merge:false}),
+        nhanh migration, nhanh init ({merge:false}), reloadFromRemote, drainOutbox
+        (lastMerged) + fullDataRef.current = res.merged; rawRemote chi lay khi
+        !mainRead.fromCache; save() dung alive(...)/aliveData(...); tach drainOutbox()
+        + drainOutboxOnce(); onDelete/onHardDelete dung deleteMarker thay .filter.
+Muc 6 — Them useEffect "v54: TU DONG BO S3" ngay truoc effect "v41-2: Mo app",
+        deps [loaded, loadError].
+Muc 7 — handleLogout thanh async: save(...) -> await drainOutbox() trong try/catch
+        -> s3Flush(fullDataRef.current) -> xoa session -> setUser(null).
+Muc 8 — Migration OB: chi loai OB thieu market/factoryId, loai bang deleteMarker
+        ({username:"migration v38i"}) + deleteReason; luon set _v38i_migrated = true;
+        sua comment stale phia tren component OpeningBalances giong V53.
+Muc 9 — src\main.jsx: import App from './GoChek_CRM_V54.jsx'
+
+Cac cho LECH so voi V53 (co y, co ly do):
+  - healRenamedRefs giu nhanh qcReports (V41-8). Yeu cau noi ro giu nguyen nhanh do.
+  - Cac block rieng cua V41-8 (qcReports trong state/buildInitData/migration,
+    migration quyen _v418_perm_migrated) duoc giu nguyen — khong thuoc pham vi rule.
+  - APP_VERSION giu "V41-8" (V53 la "V41-7").
+  - Chuoi phien ban trong comment dung "v54" thay vi "v53" theo yeu cau.
+  - Khong co lech nao khac trong lop persistence (xem muc 5 — Compare-Object).
+
+KHONG commit, KHONG tao branch/worktree, KHONG tao file markdown bao cao.
